@@ -1,0 +1,11 @@
+{
+  "name": "myide-bdd",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "bdd": "cucumber-js"
+  },
+  "devDependencies": {
+    "@cucumber/cucumber": "12.7.0"
+  }
+}
