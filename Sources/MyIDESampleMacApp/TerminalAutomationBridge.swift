@@ -31,7 +31,13 @@ final class TerminalAutomationBridge {
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            self?.handle(notification)
+            let requestID = notification.userInfo?["requestID"] as? String
+            let rawAction = notification.userInfo?["action"] as? String
+            let paneID = notification.userInfo?["paneID"] as? String
+            let input = notification.userInfo?["input"] as? String
+            Task { @MainActor in
+                self?.handle(requestID: requestID, rawAction: rawAction, paneID: paneID, input: input)
+            }
         }
     }
 
@@ -51,15 +57,14 @@ final class TerminalAutomationBridge {
         return URL(fileURLWithPath: path, isDirectory: true)
     }
 
-    private func handle(_ notification: Notification) {
+    private func handle(requestID: String?, rawAction: String?, paneID: String?, input: String?) {
         guard let automationDirectory else {
             return
         }
 
         guard
-            let userInfo = notification.userInfo,
-            let requestID = userInfo["requestID"] as? String,
-            let rawAction = userInfo["action"] as? String,
+            let requestID,
+            let rawAction,
             let action = TerminalAutomationAction(rawValue: rawAction)
         else {
             return
@@ -67,7 +72,23 @@ final class TerminalAutomationBridge {
 
         switch action {
         case .snapshot:
-            let paneID = userInfo["paneID"] as? String
+            let response = TerminalAutomationSnapshotResponse(
+                paneID: paneID,
+                snapshot: terminalSnapshot(for: paneID)
+            )
+            write(response: response, requestID: requestID, automationDirectory: automationDirectory)
+        case .layout:
+            let ratios = terminalLayout(for: paneID)
+            let response = TerminalAutomationLayoutResponse(
+                paneID: paneID,
+                widthRatio: ratios.widthRatio,
+                heightRatio: ratios.heightRatio
+            )
+            write(response: response, requestID: requestID, automationDirectory: automationDirectory)
+        case .sendInput:
+            if let input {
+                sendInput(input, to: paneID)
+            }
             let response = TerminalAutomationSnapshotResponse(
                 paneID: paneID,
                 snapshot: terminalSnapshot(for: paneID)
@@ -90,11 +111,36 @@ final class TerminalAutomationBridge {
         return ""
     }
 
+    private func terminalLayout(for paneID: String?) -> (widthRatio: Double, heightRatio: Double) {
+        compactDeadReferences()
+
+        if let paneID, let terminal = terminals[paneID]?.value {
+            return terminal.terminalLayoutRatios()
+        }
+
+        if let terminal = terminals.values.compactMap(\.value).first {
+            return terminal.terminalLayoutRatios()
+        }
+
+        return (0, 0)
+    }
+
+    private func sendInput(_ input: String, to paneID: String?) {
+        compactDeadReferences()
+
+        if let paneID, let terminal = terminals[paneID]?.value {
+            terminal.sendAutomationInput(input)
+            return
+        }
+
+        terminals.values.compactMap(\.value).first?.sendAutomationInput(input)
+    }
+
     private func compactDeadReferences() {
         terminals = terminals.filter { $0.value.value != nil }
     }
 
-    private func write(response: TerminalAutomationSnapshotResponse, requestID: String, automationDirectory: URL) {
+    private func write<Response: Encodable>(response: Response, requestID: String, automationDirectory: URL) {
         do {
             try FileManager.default.createDirectory(at: automationDirectory, withIntermediateDirectories: true)
             let url = automationDirectory.appendingPathComponent("\(requestID).json")

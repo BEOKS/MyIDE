@@ -1,0 +1,6 @@
+.DS_Store
+.build
+.swiftpm
+.bundle
+node_modules
+vendor

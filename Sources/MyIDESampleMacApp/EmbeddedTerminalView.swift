@@ -2,7 +2,10 @@ import AppKit
 import SwiftTerm
 import MyIDECore
 
-final class EmbeddedTerminalView: LocalProcessTerminalView, LocalProcessTerminalViewDelegate {
+@MainActor
+final class EmbeddedTerminalView: LocalProcessTerminalView {
+    private static var didRunAutomationStartCommand = false
+
     let paneID: String
     private let configuration: TerminalPaneConfiguration
     private var hasStartedProcess = false
@@ -12,7 +15,6 @@ final class EmbeddedTerminalView: LocalProcessTerminalView, LocalProcessTerminal
         self.configuration = configuration
         super.init(frame: .zero)
         setupAppearance()
-        processDelegate = self
         setAccessibilityElement(true)
         setAccessibilityIdentifier("embedded-terminal-\(paneID)")
         setAccessibilityLabel("Embedded Terminal \(paneID)")
@@ -21,13 +23,6 @@ final class EmbeddedTerminalView: LocalProcessTerminalView, LocalProcessTerminal
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         nil
-    }
-
-    deinit {
-        terminate()
-        Task { @MainActor in
-            TerminalAutomationBridge.shared.unregisterTerminal(paneID: self.paneID)
-        }
     }
 
     override func viewDidMoveToWindow() {
@@ -40,34 +35,34 @@ final class EmbeddedTerminalView: LocalProcessTerminalView, LocalProcessTerminal
         startIfNeeded()
     }
 
-    override func mouseDown(with event: NSEvent) {
-        NSApplication.shared.activate(ignoringOtherApps: true)
-        window?.makeKeyAndOrderFront(nil)
-        window?.makeFirstResponder(self)
-        super.mouseDown(with: event)
-    }
-
     func terminalSnapshot() -> String {
         String(decoding: getTerminal().getBufferAsData(), as: UTF8.self)
     }
 
-    func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {
-        _ = newCols
-        _ = newRows
+    func terminalLayoutRatios() -> (widthRatio: Double, heightRatio: Double) {
+        let terminalFrame = bounds.size
+        guard
+            let containerSize = enclosingContainerSize(),
+            containerSize.width > 0,
+            containerSize.height > 0
+        else {
+            return (1, 1)
+        }
+
+        return (
+            widthRatio: terminalFrame.width / containerSize.width,
+            heightRatio: terminalFrame.height / containerSize.height
+        )
     }
 
-    func setTerminalTitle(source: LocalProcessTerminalView, title: String) {
-        _ = title
+    func stopTerminal() {
+        terminate()
+        TerminalAutomationBridge.shared.unregisterTerminal(paneID: paneID)
     }
 
-    func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
-        _ = source
-        _ = directory
-    }
-
-    func processTerminated(source: TerminalView, exitCode: Int32?) {
-        _ = source
-        _ = exitCode
+    func sendAutomationInput(_ text: String) {
+        let bytes = Array(text.utf8)
+        send(source: self, data: bytes[...])
     }
 
     private func setupAppearance() {
@@ -104,6 +99,7 @@ final class EmbeddedTerminalView: LocalProcessTerminalView, LocalProcessTerminal
             execName: shellIdiom,
             currentDirectory: configuration.workingDirectory
         )
+        runAutomationStartupCommandIfNeeded()
     }
 
     private func currentUserShell() -> String {
@@ -129,5 +125,34 @@ final class EmbeddedTerminalView: LocalProcessTerminalView, LocalProcessTerminal
         values.append("TERM_PROGRAM=MyIDE")
         values.append("COLORTERM=truecolor")
         return values
+    }
+
+    private func runAutomationStartupCommandIfNeeded() {
+        guard !Self.didRunAutomationStartCommand else {
+            return
+        }
+
+        let environment = ProcessInfo.processInfo.environment
+        guard let command = environment["MYIDE_AUTOMATION_START_COMMAND"], !command.isEmpty else {
+            return
+        }
+
+        Self.didRunAutomationStartCommand = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            self?.sendAutomationInput(command + "\r")
+        }
+    }
+
+    private func enclosingContainerSize() -> CGSize? {
+        var current = superview
+
+        while let view = current {
+            if view.frame.width > frame.width * 1.02 || view.frame.height > frame.height * 1.02 {
+                return view.frame.size
+            }
+            current = view.superview
+        }
+
+        return superview?.frame.size
     }
 }

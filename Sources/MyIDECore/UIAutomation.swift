@@ -75,32 +75,32 @@ public enum TerminalUIAutomation {
         terminateExistingAppInstances()
         let workspaceURL = temporaryWorkspaceURL()
         let automationDirectory = temporaryAutomationDirectory()
+        let process = Process()
+        var launchedApp: NSRunningApplication?
         defer {
+            cleanupLaunchedApp(process, app: launchedApp)
             cleanupTemporaryWorkspace(at: workspaceURL)
             cleanupTemporaryDirectory(at: automationDirectory)
         }
 
-        let process = Process()
         process.executableURL = appExecutableURL
         process.environment = mergedEnvironment(with: workspaceURL, automationDirectory: automationDirectory)
 
         try process.run()
-        defer {
-            if process.isRunning {
-                process.terminate()
-                process.waitUntilExit()
-            }
-        }
 
         guard let app = waitForRunningApplication(pid: process.processIdentifier) else {
             throw TerminalUITestError.appLaunchFailed
         }
+        launchedApp = app
 
         app.activate(options: [.activateAllWindows])
         waitFor(seconds: 0.5)
 
         let finder = NSWorkspace.shared.runningApplications.first(where: { $0.localizedName == "Finder" })
         finder?.activate(options: [.activateAllWindows])
+        waitFor(seconds: 0.3)
+
+        app.activate(options: [.activateAllWindows])
         waitFor(seconds: 0.3)
 
         let appElement = AXUIElementCreateApplication(process.processIdentifier)
@@ -116,9 +116,14 @@ public enum TerminalUIAutomation {
         click(at: CGPoint(x: frame.midX, y: frame.midY))
         waitFor(seconds: 0.3)
 
+        _ = waitUntil(timeout: 5, pollInterval: 0.2, body: { () -> String? in
+            try? requestTerminalSnapshot(in: automationDirectory)
+        })
         sendText(typedText)
         let value = try waitForTerminalSnapshot(containing: typedText, in: automationDirectory)
 
+        app.activate(options: [.activateAllWindows])
+        waitFor(seconds: 0.2)
         let frontmost = NSWorkspace.shared.frontmostApplication?.localizedName ?? ""
         let focused = frontmost == "MyIDESampleMacApp"
 
@@ -141,32 +146,36 @@ public enum TerminalUIAutomation {
         terminateExistingAppInstances()
         let workspaceURL = temporaryWorkspaceURL()
         let automationDirectory = temporaryAutomationDirectory()
+        let process = Process()
+        var launchedApp: NSRunningApplication?
         defer {
+            cleanupLaunchedApp(process, app: launchedApp)
             cleanupTemporaryWorkspace(at: workspaceURL)
             cleanupTemporaryDirectory(at: automationDirectory)
         }
 
-        let process = Process()
         process.executableURL = appExecutableURL
-        process.environment = mergedEnvironment(with: workspaceURL, automationDirectory: automationDirectory)
+        process.environment = mergedEnvironment(
+            with: workspaceURL,
+            automationDirectory: automationDirectory,
+            startupCommand: command
+        )
 
         try process.run()
-        defer {
-            if process.isRunning {
-                process.terminate()
-                process.waitUntilExit()
-            }
-        }
 
         guard let app = waitForRunningApplication(pid: process.processIdentifier) else {
             throw TerminalUITestError.appLaunchFailed
         }
+        launchedApp = app
 
         app.activate(options: [.activateAllWindows])
         waitFor(seconds: 0.5)
 
         let finder = NSWorkspace.shared.runningApplications.first(where: { $0.localizedName == "Finder" })
         finder?.activate(options: [.activateAllWindows])
+        waitFor(seconds: 0.3)
+
+        app.activate(options: [.activateAllWindows])
         waitFor(seconds: 0.3)
 
         let appElement = AXUIElementCreateApplication(process.processIdentifier)
@@ -182,10 +191,9 @@ public enum TerminalUIAutomation {
         click(at: CGPoint(x: frame.midX, y: frame.midY))
         waitFor(seconds: 0.3)
 
-        sendText(command)
-        sendKeyCode(36)
-
         let value = try waitForTerminalSnapshot(containing: expectedOutput, in: automationDirectory)
+        app.activate(options: [.activateAllWindows])
+        waitFor(seconds: 0.2)
         let frontmost = NSWorkspace.shared.frontmostApplication?.localizedName ?? ""
         let focused = frontmost == "MyIDESampleMacApp"
 
@@ -204,25 +212,22 @@ public enum TerminalUIAutomation {
         terminateExistingAppInstances()
         let workspaceURL = temporaryWorkspaceURL()
         let automationDirectory = temporaryAutomationDirectory()
+        let process = Process()
+        var launchedApp: NSRunningApplication?
         defer {
+            cleanupLaunchedApp(process, app: launchedApp)
             cleanupTemporaryWorkspace(at: workspaceURL)
             cleanupTemporaryDirectory(at: automationDirectory)
         }
 
-        let process = Process()
         process.executableURL = appExecutableURL
         process.environment = mergedEnvironment(with: workspaceURL, automationDirectory: automationDirectory)
         try process.run()
-        defer {
-            if process.isRunning {
-                process.terminate()
-                process.waitUntilExit()
-            }
-        }
 
         guard let app = waitForRunningApplication(pid: process.processIdentifier) else {
             throw TerminalUITestError.appLaunchFailed
         }
+        launchedApp = app
 
         app.activate(options: [.activateAllWindows])
         waitFor(seconds: 0.5)
@@ -232,20 +237,18 @@ public enum TerminalUIAutomation {
             throw TerminalUITestError.appWindowNotFound
         }
 
-        guard let surfaceElement = waitForTerminalSurface(in: windowElement) else {
-            throw TerminalUITestError.surfaceNotFound
-        }
+        let windowFrame = try frame(of: windowElement)
+        click(at: CGPoint(x: windowFrame.midX, y: windowFrame.midY))
+        waitFor(seconds: 0.3)
 
-        guard let terminalElement = waitForElement(identifier: "embedded-terminal-", in: windowElement, partialMatch: true) else {
-            throw TerminalUITestError.surfaceNotFound
-        }
-
-        let editorFrame = try frame(of: terminalElement)
-        let surfaceFrame = try frame(of: surfaceElement)
+        _ = waitUntil(timeout: 5, pollInterval: 0.2, body: { () -> String? in
+            try? requestTerminalSnapshot(in: automationDirectory)
+        })
+        let layout = try requestTerminalLayout(in: automationDirectory)
 
         return TerminalUILayoutResult(
-            widthRatio: editorFrame.width / surfaceFrame.width,
-            heightRatio: editorFrame.height / surfaceFrame.height
+            widthRatio: layout.widthRatio,
+            heightRatio: layout.heightRatio
         )
     }
 
@@ -257,28 +260,29 @@ public enum TerminalUIAutomation {
         terminateExistingAppInstances()
         let workspaceURL = temporaryWorkspaceURL()
         let automationDirectory = temporaryAutomationDirectory()
+        let process = Process()
+        var launchedApp: NSRunningApplication?
         defer {
+            cleanupLaunchedApp(process, app: launchedApp)
             cleanupTemporaryWorkspace(at: workspaceURL)
             cleanupTemporaryDirectory(at: automationDirectory)
         }
 
-        let process = Process()
         process.executableURL = appExecutableURL
         process.environment = mergedEnvironment(with: workspaceURL, automationDirectory: automationDirectory)
         try process.run()
-        defer {
-            if process.isRunning {
-                process.terminate()
-                process.waitUntilExit()
-            }
-        }
 
         guard let app = waitForRunningApplication(pid: process.processIdentifier) else {
             throw TerminalUITestError.appLaunchFailed
         }
+        launchedApp = app
 
         app.activate(options: [.activateAllWindows])
         waitFor(seconds: 0.5)
+
+        let finder = NSWorkspace.shared.runningApplications.first(where: { $0.localizedName == "Finder" })
+        finder?.activate(options: [.activateAllWindows])
+        waitFor(seconds: 0.3)
 
         let appElement = AXUIElementCreateApplication(process.processIdentifier)
         guard let windowElement = waitForWindow(in: appElement) else {
@@ -298,6 +302,20 @@ public enum TerminalUIAutomation {
             .forEach { app in
                 app.forceTerminate()
             }
+    }
+
+    private static func cleanupLaunchedApp(_ process: Process, app: NSRunningApplication?) {
+        app?.forceTerminate()
+        _ = waitUntil(timeout: 3, pollInterval: 0.1) {
+            process.isRunning ? nil : true
+        }
+
+        if process.isRunning {
+            process.terminate()
+            _ = waitUntil(timeout: 2, pollInterval: 0.1) {
+                process.isRunning ? nil : true
+            }
+        }
     }
 
     private static func waitForRunningApplication(pid: pid_t) -> NSRunningApplication? {
@@ -325,15 +343,26 @@ public enum TerminalUIAutomation {
         try? FileManager.default.removeItem(at: url)
     }
 
-    private static func mergedEnvironment(with workspaceURL: URL, automationDirectory: URL) -> [String: String] {
+    private static func mergedEnvironment(
+        with workspaceURL: URL,
+        automationDirectory: URL,
+        startupCommand: String? = nil
+    ) -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
         environment["MYIDE_WORKSPACE_PATH"] = workspaceURL.path
         environment["MYIDE_AUTOMATION_DIR"] = automationDirectory.path
+        if let startupCommand, !startupCommand.isEmpty {
+            environment["MYIDE_AUTOMATION_START_COMMAND"] = startupCommand
+        }
         return environment
     }
 
     private static func waitForWindow(in appElement: AXUIElement) -> AXUIElement? {
         waitUntil(timeout: 10) {
+            if let focusedWindow = copyAttribute(appElement, attribute: kAXFocusedWindowAttribute) {
+                return unsafeDowncast(focusedWindow, to: AXUIElement.self)
+            }
+
             guard let windows = copyAttribute(appElement, attribute: kAXWindowsAttribute) as? [AXUIElement] else {
                 return nil
             }
@@ -344,6 +373,8 @@ public enum TerminalUIAutomation {
 
     private static func waitForTerminalSurface(in root: AXUIElement) -> AXUIElement? {
         waitForElement(identifier: "terminal-pane-surface", in: root)
+            ?? waitForElement(identifier: "pane-container-terminal", in: root)
+            ?? waitForElement(identifier: "embedded-terminal-", in: root, partialMatch: true)
     }
 
     private static func waitForElement(identifier: String, in root: AXUIElement, partialMatch: Bool = false) -> AXUIElement? {
@@ -454,21 +485,42 @@ public enum TerminalUIAutomation {
     }
 
     private static func sendText(_ text: String) {
-        guard let source = CGEventSource(stateID: .hidSystemState) else {
-            return
-        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = [
+            "-e",
+            "on run argv",
+            "-e",
+            "tell application \"System Events\" to keystroke (item 1 of argv)",
+            "-e",
+            "end run",
+            text
+        ]
+        try? process.run()
+        process.waitUntilExit()
+        waitFor(seconds: 0.25)
+    }
 
-        for scalar in text.utf16 {
-            var value = scalar
-            let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true)
-            let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false)
-            down?.keyboardSetUnicodeString(stringLength: 1, unicodeString: &value)
-            up?.keyboardSetUnicodeString(stringLength: 1, unicodeString: &value)
-            down?.post(tap: .cghidEventTap)
-            up?.post(tap: .cghidEventTap)
-        }
+    private static func pasteTextViaAppleScript(_ text: String) {
+        let pasteboard = NSPasteboard.general
+        let previousString = pasteboard.string(forType: .string)
 
-        waitFor(seconds: 0.2)
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = [
+            "-e",
+            "tell application \"System Events\" to keystroke \"v\" using command down"
+        ]
+        try? process.run()
+        process.waitUntilExit()
+        waitFor(seconds: 0.3)
+
+        pasteboard.clearContents()
+        if let previousString, !previousString.isEmpty {
+            pasteboard.setString(previousString, forType: .string)
+        }
     }
 
     private static func waitForTerminalSnapshot(containing expected: String, in automationDirectory: URL) throws -> String {
@@ -514,6 +566,31 @@ public enum TerminalUIAutomation {
         let response = try JSONDecoder().decode(TerminalAutomationSnapshotResponse.self, from: responseData)
         return response.snapshot
     }
+
+    private static func requestTerminalLayout(in automationDirectory: URL) throws -> TerminalAutomationLayoutResponse {
+        try FileManager.default.createDirectory(at: automationDirectory, withIntermediateDirectories: true)
+        let requestID = UUID().uuidString
+        let responseURL = automationDirectory.appendingPathComponent("\(requestID).json")
+
+        DistributedNotificationCenter.default().postNotificationName(
+            Notification.Name("myide.terminal-automation.request"),
+            object: nil,
+            userInfo: [
+                "requestID": requestID,
+                "action": TerminalAutomationAction.layout.rawValue
+            ],
+            options: [.deliverImmediately]
+        )
+
+        guard let responseData = waitUntil(timeout: 3, pollInterval: 0.1, body: { () -> Data? in
+            try? Data(contentsOf: responseURL)
+        }) else {
+            throw TerminalUITestError.automationResponseMissing
+        }
+
+        return try JSONDecoder().decode(TerminalAutomationLayoutResponse.self, from: responseData)
+    }
+
 
     private static func copyAttribute(_ element: AXUIElement, attribute: String) -> AnyObject? {
         var value: CFTypeRef?
