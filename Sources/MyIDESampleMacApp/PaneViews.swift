@@ -11,24 +11,51 @@ struct ProportionalSplitView<Primary: View, Secondary: View>: View {
 
     var body: some View {
         GeometryReader { geometry in
+            let metrics = PaneSplitLayoutMetrics(
+                totalExtent: axis == .vertical ? geometry.size.width : geometry.size.height,
+                ratio: ratio
+            )
+            let primaryExtent = CGFloat(metrics.primaryExtent)
+            let secondaryExtent = CGFloat(metrics.secondaryExtent)
+            let dividerThickness = CGFloat(PaneSplitLayoutMetrics.dividerThickness)
+            let dividerOffset = CGFloat(metrics.dividerOffset)
+
             if axis == .vertical {
-                HStack(spacing: 1) {
-                    primary
-                        .frame(width: geometry.size.width * ratio)
+                ZStack(alignment: .topLeading) {
+                    HStack(spacing: 0) {
+                        primary
+                            .frame(width: primaryExtent)
+                            .frame(maxHeight: .infinity)
+                        secondary
+                            .frame(width: secondaryExtent)
+                            .frame(maxHeight: .infinity)
+                    }
+
+                    Rectangle()
+                        .fill(Color(nsColor: .separatorColor))
+                        .frame(width: dividerThickness)
                         .frame(maxHeight: .infinity)
-                    Divider()
-                    secondary
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .offset(x: dividerOffset)
                 }
+                .clipped()
             } else {
-                VStack(spacing: 1) {
-                    primary
-                        .frame(height: geometry.size.height * ratio)
+                ZStack(alignment: .topLeading) {
+                    VStack(spacing: 0) {
+                        primary
+                            .frame(height: primaryExtent)
+                            .frame(maxWidth: .infinity)
+                        secondary
+                            .frame(height: secondaryExtent)
+                            .frame(maxWidth: .infinity)
+                    }
+
+                    Rectangle()
+                        .fill(Color(nsColor: .separatorColor))
+                        .frame(height: dividerThickness)
                         .frame(maxWidth: .infinity)
-                    Divider()
-                    secondary
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .offset(y: dividerOffset)
                 }
+                .clipped()
             }
         }
     }
@@ -152,6 +179,7 @@ struct PaneContainer<Content: View>: View {
     let onSelect: () -> Void
     @ViewBuilder let content: Content
     private let chrome = PaneChromeConfiguration.minimal
+    private let clipShape = RoundedRectangle(cornerRadius: 12, style: .continuous)
 
     var body: some View {
         Group {
@@ -165,9 +193,10 @@ struct PaneContainer<Content: View>: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(.thinMaterial, in: clipShape)
+        .clipShape(clipShape)
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            clipShape
                 .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
         )
         .accessibilityIdentifier("pane-container-\(kind.rawValue)")
@@ -189,56 +218,75 @@ struct PanePickerPaneView: View {
     let paneID: String
     let onConfigurePane: (String, PaneKind) -> Void
 
-    private let columns = [
-        GridItem(.flexible(), spacing: 12),
-        GridItem(.flexible(), spacing: 12)
-    ]
-
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [
-                    Color(nsColor: .windowBackgroundColor),
-                    Color.accentColor.opacity(0.08)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
+        GeometryReader { geometry in
+            let metrics = PanePickerLayoutMetrics(
+                containerWidth: geometry.size.width,
+                containerHeight: geometry.size.height
+            )
+            let horizontalPadding = CGFloat(metrics.horizontalPadding)
+            let verticalPadding = CGFloat(metrics.verticalPadding)
+            let headerSpacing = CGFloat(metrics.headerSpacing)
+            let cardMinHeight = CGFloat(metrics.cardMinHeight)
+            let contentMaxWidth = CGFloat(metrics.contentMaxWidth)
+            let columns = Array(
+                repeating: GridItem(.flexible(), spacing: 12, alignment: .top),
+                count: metrics.columnCount
             )
 
-            VStack(spacing: 20) {
-                VStack(spacing: 8) {
-                    Text("Choose a pane")
-                        .font(.title3.weight(.semibold))
-                    Text("Pick what should open in this split.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(nsColor: .windowBackgroundColor),
+                        Color.accentColor.opacity(0.08)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
 
-                LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(PaneKind.creatableCases, id: \.self) { kind in
-                        Button {
-                            onConfigurePane(paneID, kind)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(kind.displayTitle)
-                                    .font(.headline)
-                                Text(description(for: kind))
-                                    .font(.caption)
+                ScrollView(.vertical, showsIndicators: metrics.requiresScrolling) {
+                    VStack(spacing: 20) {
+                        VStack(spacing: headerSpacing) {
+                            Text("Choose a pane")
+                                .font(.title3.weight(.semibold))
+                                .multilineTextAlignment(.center)
+                            if metrics.showsSubtitle {
+                                Text("Pick what should open in this split.")
+                                    .font(.callout)
                                     .foregroundStyle(.secondary)
-                                    .multilineTextAlignment(.leading)
+                                    .multilineTextAlignment(.center)
                             }
-                            .frame(maxWidth: .infinity, minHeight: 84, alignment: .leading)
-                            .padding(14)
-                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                         }
-                        .buttonStyle(.plain)
+
+                        LazyVGrid(columns: columns, spacing: 12) {
+                            ForEach(PaneKind.creatableCases, id: \.self) { kind in
+                                Button {
+                                    onConfigurePane(paneID, kind)
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text(kind.displayTitle)
+                                            .font(.headline)
+                                        Text(description(for: kind))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .multilineTextAlignment(.leading)
+                                    }
+                                    .frame(maxWidth: .infinity, minHeight: cardMinHeight, alignment: .leading)
+                                    .padding(14)
+                                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .frame(maxWidth: contentMaxWidth)
                     }
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, horizontalPadding)
+                    .padding(.vertical, verticalPadding)
                 }
-                .frame(maxWidth: 440)
             }
-            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func description(for kind: PaneKind) -> String {

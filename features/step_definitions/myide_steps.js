@@ -590,12 +590,34 @@ When('I headless-check pane split and remove', function () {
   this.splitRemoveResult = this.runCliJson('headless-check-pane-split-and-remove')
 })
 
+When('I headless-check split presentation sizing', function () {
+  this.splitPresentationResult = this.runCliJson('headless-check-split-presentation-sizing')
+})
+
 Then('the split should produce {int} panes', function (count) {
   assert.equal(this.splitRemoveResult.paneCountAfterSplit, count)
 })
 
 Then('the split ratio should be {float}', function (ratio) {
   assert.equal(this.splitRemoveResult.splitRatio, ratio)
+})
+
+Then('a 200-point vertical split should produce pane extents of {int} and {int}', function (first, second) {
+  assert.equal(this.splitPresentationResult.verticalPrimaryExtent, first)
+  assert.equal(this.splitPresentationResult.verticalSecondaryExtent, second)
+})
+
+Then('a 300-point horizontal split should produce pane extents of {int} and {int}', function (first, second) {
+  assert.equal(this.splitPresentationResult.horizontalPrimaryExtent, first)
+  assert.equal(this.splitPresentationResult.horizontalSecondaryExtent, second)
+})
+
+Then('the compact picker should collapse to {int} column', function (count) {
+  assert.equal(this.splitPresentationResult.compactPickerColumnCount, count)
+})
+
+Then('the compact picker should require scrolling instead of overflowing', function () {
+  assert.equal(this.splitPresentationResult.compactPickerRequiresScrolling, true)
 })
 
 Then('removing a pane should leave {int} pane', function (count) {

@@ -247,6 +247,9 @@ private struct CLI {
         case "headless-check-pane-layout-stability":
             let result = try TerminalHeadlessHarness.checkPaneLayoutStability()
             try printJSON(result)
+        case "headless-check-split-presentation-sizing":
+            let result = TerminalHeadlessHarness.checkSplitPresentationSizing()
+            try printJSON(result)
         case "headless-check-nested-pane-split":
             let result = try TerminalHeadlessHarness.checkNestedPaneSplit()
             try printJSON(result)
@@ -461,6 +464,11 @@ private struct CLI {
       headless-check-ime-composition
       headless-check-delete-line-shortcut
       headless-check-tmux-split-shortcuts
+      headless-check-pane-split-and-remove
+      headless-check-pane-layout-stability
+      headless-check-split-presentation-sizing
+      headless-check-nested-pane-split
+      headless-check-tmux-split-key-matching
       headless-check-pane-close-shortcuts
     """
 }

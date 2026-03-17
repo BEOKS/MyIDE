@@ -43,6 +43,13 @@ Feature: Regression prevention
     And removing a pane should leave 1 pane
     And the layout after removal should be a single leaf
 
+  Scenario: Split presentation keeps 50:50 pane extents and picker stays inside compact panes
+    When I headless-check split presentation sizing
+    Then a 200-point vertical split should produce pane extents of 100 and 100
+    And a 300-point horizontal split should produce pane extents of 150 and 150
+    And the compact picker should collapse to 1 column
+    And the compact picker should require scrolling instead of overflowing
+
   Scenario: Nested pane splits preserve layout tree structure
     When I headless-check nested pane split
     Then the nested split should produce 3 panes

@@ -624,6 +624,21 @@ public enum TerminalHeadlessHarness {
         )
     }
 
+    public static func checkSplitPresentationSizing() -> SplitPresentationSizingResult {
+        let verticalMetrics = PaneSplitLayoutMetrics(totalExtent: 200, ratio: 0.5)
+        let horizontalMetrics = PaneSplitLayoutMetrics(totalExtent: 300, ratio: 0.5)
+        let pickerMetrics = PanePickerLayoutMetrics(containerWidth: 200, containerHeight: 150)
+
+        return SplitPresentationSizingResult(
+            verticalPrimaryExtent: verticalMetrics.primaryExtent,
+            verticalSecondaryExtent: verticalMetrics.secondaryExtent,
+            horizontalPrimaryExtent: horizontalMetrics.primaryExtent,
+            horizontalSecondaryExtent: horizontalMetrics.secondaryExtent,
+            compactPickerColumnCount: pickerMetrics.columnCount,
+            compactPickerRequiresScrolling: pickerMetrics.requiresScrolling
+        )
+    }
+
     public static func checkCLIWorkspaceSync() throws -> CLIWorkspaceSyncResult {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("myide-sync-test-\(UUID().uuidString)")
@@ -1109,5 +1124,30 @@ public struct TmuxSplitShortcutResult: Codable, Sendable {
         self.paneCount = paneCount
         self.rootAxisAfterVerticalSplit = rootAxisAfterVerticalSplit
         self.finalLayoutDescription = finalLayoutDescription
+    }
+}
+
+public struct SplitPresentationSizingResult: Codable, Sendable {
+    public var verticalPrimaryExtent: Double
+    public var verticalSecondaryExtent: Double
+    public var horizontalPrimaryExtent: Double
+    public var horizontalSecondaryExtent: Double
+    public var compactPickerColumnCount: Int
+    public var compactPickerRequiresScrolling: Bool
+
+    public init(
+        verticalPrimaryExtent: Double,
+        verticalSecondaryExtent: Double,
+        horizontalPrimaryExtent: Double,
+        horizontalSecondaryExtent: Double,
+        compactPickerColumnCount: Int,
+        compactPickerRequiresScrolling: Bool
+    ) {
+        self.verticalPrimaryExtent = verticalPrimaryExtent
+        self.verticalSecondaryExtent = verticalSecondaryExtent
+        self.horizontalPrimaryExtent = horizontalPrimaryExtent
+        self.horizontalSecondaryExtent = horizontalSecondaryExtent
+        self.compactPickerColumnCount = compactPickerColumnCount
+        self.compactPickerRequiresScrolling = compactPickerRequiresScrolling
     }
 }
