@@ -4,7 +4,6 @@ import MyIDECore
 @MainActor
 final class AppViewModel: ObservableObject {
     @Published private(set) var workspace: Workspace
-    @Published var showingAddPaneSheet = false
     @Published var errorMessage: String?
 
     let persistenceURL: URL
@@ -28,8 +27,15 @@ final class AppViewModel: ObservableObject {
     func addSession() -> WorkspaceSession? {
         let name = "Session \(workspace.sessions.count + 1)"
         let session = workspace.addSession(named: name)
-        persist()
-        return session
+
+        do {
+            _ = try workspace.addWindow(toSessionID: session.id, title: "Main")
+            persist()
+            return session
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
     }
 
     func addWindow(to sessionID: String) -> WorkspaceWindow? {
@@ -54,6 +60,28 @@ final class AppViewModel: ObservableObject {
             persist()
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    func splitWithTerminalPane(sessionID: String, windowID: String, paneID: String?, axis: PaneSplitAxis) -> WorkspacePane? {
+        do {
+            let pane = WorkspacePane.terminal(
+                title: "Terminal",
+                provider: .terminal,
+                workingDirectory: FileManager.default.currentDirectoryPath
+            )
+            let newPane = try workspace.splitPane(
+                sessionID: sessionID,
+                windowID: windowID,
+                paneID: paneID,
+                axis: axis,
+                newPane: pane
+            )
+            persist()
+            return newPane
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
         }
     }
 

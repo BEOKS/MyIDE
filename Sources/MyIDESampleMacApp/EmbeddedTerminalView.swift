@@ -35,6 +35,7 @@ final class EmbeddedTerminalView: LocalProcessTerminalView {
     let paneID: String
     private let configuration: TerminalPaneConfiguration
     private let onProcessTerminated: () -> Void
+    private let compositionState = TerminalCompositionState()
     private let lifecycleController = TerminalPaneLifecycleController()
     private lazy var terminalProcessDelegate = EmbeddedTerminalProcessDelegate { [weak self] exitCode in
         self?.handleProcessTermination(exitCode: exitCode)
@@ -86,6 +87,46 @@ final class EmbeddedTerminalView: LocalProcessTerminalView {
 
         TerminalAutomationBridge.shared.registerTerminal(self)
         startIfNeeded()
+    }
+
+    override func insertText(_ string: Any, replacementRange: NSRange) {
+        guard let commit = compositionState.consumeCommit(from: string) else {
+            return
+        }
+
+        if commit.wasComposing {
+            super.unmarkText()
+            send(txt: commit.text)
+            return
+        }
+
+        super.insertText(commit.text as NSString, replacementRange: replacementRange)
+    }
+
+    override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        compositionState.setMarkedText(string, selectedRange: selectedRange)
+        super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
+    }
+
+    override func unmarkText() {
+        compositionState.unmarkText()
+        super.unmarkText()
+    }
+
+    override func selectedRange() -> NSRange {
+        compositionState.hasMarkedText ? compositionState.selectedRange() : super.selectedRange()
+    }
+
+    override func markedRange() -> NSRange {
+        compositionState.markedRange()
+    }
+
+    override func hasMarkedText() -> Bool {
+        compositionState.hasMarkedText
+    }
+
+    override func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?) -> NSAttributedString? {
+        compositionState.attributedSubstring(forProposedRange: range, actualRange: actualRange)
     }
 
     @objc

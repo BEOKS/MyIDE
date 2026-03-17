@@ -7,7 +7,9 @@ struct ContentView: View {
     let onCreateSession: () -> String?
 
     @Environment(\.openWindow) private var openWindow
+    @StateObject private var sceneState = WindowSceneState()
     @State private var selectedWindowID: String?
+    @State private var selectedPaneID: String?
 
     var body: some View {
         NavigationSplitView {
@@ -15,19 +17,7 @@ struct ContentView: View {
         } detail: {
             detail
         }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    viewModel.showingAddPaneSheet = true
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .labelStyle(.iconOnly)
-                .help("Add Pane")
-                .disabled(selectedWindow == nil)
-            }
-        }
-        .sheet(isPresented: $viewModel.showingAddPaneSheet) {
+        .sheet(isPresented: $sceneState.showingAddPaneSheet) {
             AddPaneSheet { draft in
                 guard let selectedWindowID else {
                     return
@@ -44,10 +34,20 @@ struct ContentView: View {
         }
         .onAppear {
             ensureSelectedWindow()
+            ensureSelectedPane()
         }
         .onChange(of: session?.windows.map(\.id) ?? []) { _, _ in
             ensureSelectedWindow()
+            ensureSelectedPane()
         }
+        .onChange(of: selectedWindow?.panes.map(\.id) ?? []) { _, _ in
+            ensureSelectedPane()
+        }
+        .background(
+            WindowKeyMonitor {
+                handleShortcut($0)
+            }
+        )
     }
 
     private var sidebar: some View {
@@ -85,14 +85,19 @@ struct ContentView: View {
                 }
             }
         }
-        .navigationTitle(session?.name ?? "Workspace")
+        .navigationTitle("")
     }
 
     @ViewBuilder
     private var detail: some View {
         if let window = selectedWindow {
             PaneWorkspaceView(
+                layout: window.layout,
                 panes: window.panes,
+                selectedPaneID: selectedPaneID,
+                onSelectPane: { paneID in
+                    selectedPaneID = paneID
+                },
                 onTerminalExit: { paneID in
                     viewModel.removePane(sessionID: sessionID, windowID: window.id, paneID: paneID)
                 },
@@ -122,7 +127,7 @@ struct ContentView: View {
                 }
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(12)
+            .padding(8)
         } else if session != nil {
             ContentUnavailableView(
                 "No Window Selected",
@@ -173,5 +178,56 @@ struct ContentView: View {
         }
 
         selectedWindowID = session.windows.first?.id
+    }
+
+    private func ensureSelectedPane() {
+        guard let selectedWindow else {
+            selectedPaneID = nil
+            return
+        }
+
+        if let selectedPaneID,
+           selectedWindow.panes.contains(where: { $0.id == selectedPaneID }) {
+            return
+        }
+
+        selectedPaneID = selectedWindow.panes.first?.id
+    }
+
+    private func handleShortcut(_ event: NSEvent) -> Bool {
+        guard selectedWindow != nil else {
+            return false
+        }
+
+        let flags = event.modifierFlags.intersection([.control, .shift, .command, .option])
+        guard flags == [.control, .shift], let characters = event.characters else {
+            return false
+        }
+
+        switch characters {
+        case "%":
+            splitCurrentPane(axis: .vertical)
+            return true
+        case "\"":
+            splitCurrentPane(axis: .horizontal)
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func splitCurrentPane(axis: PaneSplitAxis) {
+        guard let selectedWindowID else {
+            return
+        }
+
+        if let pane = viewModel.splitWithTerminalPane(
+            sessionID: sessionID,
+            windowID: selectedWindowID,
+            paneID: selectedPaneID,
+            axis: axis
+        ) {
+            selectedPaneID = pane.id
+        }
     }
 }

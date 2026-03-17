@@ -149,6 +149,104 @@ When('I render markdown file {string}', function (fileName) {
   )
 })
 
+When('I show the current session', function () {
+  this.currentSession = this.runCliJson(
+    'show-session',
+    '--workspace', this.workspacePath,
+    '--session-id', this.currentSession.id
+  )
+})
+
+When('I rename the current session to {string}', function (name) {
+  this.currentSession = this.runCliJson(
+    'update-session',
+    '--workspace', this.workspacePath,
+    '--session-id', this.currentSession.id,
+    '--name', name
+  )
+})
+
+When('I delete the current session', function () {
+  this.workspaceSnapshot = this.runCliJson(
+    'delete-session',
+    '--workspace', this.workspacePath,
+    '--session-id', this.currentSession.id
+  )
+  this.currentSession = null
+})
+
+When('I show the current window', function () {
+  this.currentWindow = this.runCliJson(
+    'show-window',
+    '--workspace', this.workspacePath,
+    '--session-id', this.currentSession.id,
+    '--window-id', this.currentWindow.id
+  )
+})
+
+When('I rename the current window to {string}', function (title) {
+  this.currentWindow = this.runCliJson(
+    'update-window',
+    '--workspace', this.workspacePath,
+    '--session-id', this.currentSession.id,
+    '--window-id', this.currentWindow.id,
+    '--title', title
+  )
+})
+
+When('I delete the current window', function () {
+  this.currentSession = this.runCliJson(
+    'delete-window',
+    '--workspace', this.workspacePath,
+    '--session-id', this.currentSession.id,
+    '--window-id', this.currentWindow.id
+  )
+  this.currentWindow = null
+})
+
+When('I show the current pane', function () {
+  this.currentPane = this.runCliJson(
+    'show-pane',
+    '--workspace', this.workspacePath,
+    '--session-id', this.currentSession.id,
+    '--window-id', this.currentWindow.id,
+    '--pane-id', this.currentPane.id
+  )
+})
+
+When('I rename the current pane to {string}', function (title) {
+  this.currentPane = this.runCliJson(
+    'update-pane',
+    '--workspace', this.workspacePath,
+    '--session-id', this.currentSession.id,
+    '--window-id', this.currentWindow.id,
+    '--pane-id', this.currentPane.id,
+    '--title', title
+  )
+})
+
+When('I update the current browser pane URL to {string}', function (url) {
+  this.currentPane = this.runCliJson(
+    'update-pane',
+    '--workspace', this.workspacePath,
+    '--session-id', this.currentSession.id,
+    '--window-id', this.currentWindow.id,
+    '--pane-id', this.currentPane.id,
+    '--url', url
+  )
+})
+
+When('I delete the current pane', function () {
+  this.currentWindow = this.runCliJson(
+    'delete-pane',
+    '--workspace', this.workspacePath,
+    '--session-id', this.currentSession.id,
+    '--window-id', this.currentWindow.id,
+    '--pane-id', this.currentPane.id
+  )
+  this.currentPane = null
+})
+
 When('I check terminal click-to-type with text {string}', function (text) {
   this.terminalInteraction = this.runCliJson(
     'check-terminal-input',
@@ -217,6 +315,26 @@ When('I headless-check the Main window reselection regression', function () {
   this.windowSemantics = this.runCliJson('headless-check-main-window-reselection-regression')
 })
 
+When('I headless-check add pane sheet scoping across session windows', function () {
+  this.windowSemantics = this.runCliJson('headless-check-add-pane-sheet-scope')
+})
+
+When('I headless-check new session defaults', function () {
+  this.windowSemantics = this.runCliJson('headless-check-new-session-defaults')
+})
+
+When('I headless-check terminal IME composition handling', function () {
+  this.terminalInteraction = this.runCliJson('headless-check-ime-composition')
+})
+
+When('I headless-check cmd+backspace terminal shortcut handling', function () {
+  this.terminalInteraction = this.runCliJson('headless-check-delete-line-shortcut')
+})
+
+When('I headless-check tmux split shortcuts', function () {
+  this.windowSemantics = this.runCliJson('headless-check-tmux-split-shortcuts')
+})
+
 Then('the workspace should have {int} session', function (count) {
   const workspace = this.runCliJson('show', '--workspace', this.workspacePath)
   assert.equal(workspace.sessions.length, count)
@@ -227,11 +345,23 @@ Then('the workspace should have {int} sessions', function (count) {
   assert.equal(workspace.sessions.length, count)
 })
 
+Then('the shown session name should be {string}', function (name) {
+  assert.equal(this.currentSession.name, name)
+})
+
+Then('the shown session should have {int} windows', function (count) {
+  assert.equal(this.currentSession.windows.length, count)
+})
+
 Then('the current window should have {int} panes', function (count) {
   const workspace = this.runCliJson('show', '--workspace', this.workspacePath)
   const session = workspace.sessions.find((item) => item.id === this.currentSession.id)
   const window = session.windows.find((item) => item.id === this.currentWindow.id)
   assert.equal(window.panes.length, count)
+})
+
+Then('the shown window title should be {string}', function (title) {
+  assert.equal(this.currentWindow.title, title)
 })
 
 Then('the current window should include a {string} pane titled {string}', function (kind, title) {
@@ -240,6 +370,18 @@ Then('the current window should include a {string} pane titled {string}', functi
   const window = session.windows.find((item) => item.id === this.currentWindow.id)
   const pane = window.panes.find((item) => item.kind === kind && item.title === title)
   assert.ok(pane)
+})
+
+Then('the shown pane title should be {string}', function (title) {
+  assert.equal(this.currentPane.title, title)
+})
+
+Then('the shown pane kind should be {string}', function (kind) {
+  assert.equal(this.currentPane.kind, kind)
+})
+
+Then('the shown browser URL should be {string}', function (url) {
+  assert.equal(this.currentPane.browser.urlString, url)
 })
 
 Then('the current pane exit code should be {int}', function (exitCode) {
@@ -363,4 +505,55 @@ Then('the scratch window should keep {int} panes', function (count) {
 Then('the Main window should preserve pane titles:', function (table) {
   const expected = table.raw().flat()
   assert.deepEqual(this.windowSemantics.mainPaneTitlesAfterReturn, expected)
+})
+
+Then('the first session window should show the add pane sheet', function () {
+  assert.equal(this.windowSemantics.firstWindowShowingSheet, true)
+})
+
+Then('the second session window should not show the add pane sheet', function () {
+  assert.equal(this.windowSemantics.secondWindowShowingSheet, false)
+})
+
+Then('the new session should start with {int} windows in LNB', function (count) {
+  assert.equal(this.windowSemantics.windowCount, count)
+})
+
+Then('the new session first window title should be {string}', function (title) {
+  assert.equal(this.windowSemantics.firstWindowTitle, title)
+})
+
+Then('the add pane button should be enabled for the new session', function () {
+  assert.equal(this.windowSemantics.addPaneEnabled, true)
+})
+
+Then('the terminal should keep marked text during composition', function () {
+  assert.equal(this.terminalInteraction.hadMarkedTextDuringComposition, true)
+  assert.ok(this.terminalInteraction.firstMarkedRangeLength > 0)
+  assert.ok(this.terminalInteraction.updatedMarkedRangeLength > 0)
+})
+
+Then('the terminal should commit the final IME text {string}', function (text) {
+  assert.equal(this.terminalInteraction.committedText, text)
+})
+
+Then('the terminal should clear marked text after commit', function () {
+  assert.equal(this.terminalInteraction.hasMarkedTextAfterCommit, false)
+})
+
+Then('the terminal should delete to the beginning of the line', function () {
+  assert.equal(this.terminalInteraction.succeeded, true)
+  assert.ok(this.terminalInteraction.transcript.includes('ok'))
+})
+
+Then('the tmux split shortcuts should produce {int} panes', function (count) {
+  assert.equal(this.windowSemantics.paneCount, count)
+})
+
+Then('the vertical split shortcut should create a {string} root split', function (axis) {
+  assert.equal(this.windowSemantics.rootAxisAfterVerticalSplit, axis)
+})
+
+Then('the final tmux split layout should include {string}', function (text) {
+  assert.ok(this.windowSemantics.finalLayoutDescription.includes(text))
 })

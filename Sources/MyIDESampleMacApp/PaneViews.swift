@@ -4,7 +4,10 @@ import UniformTypeIdentifiers
 import MyIDECore
 
 struct PaneWorkspaceView: View {
+    let layout: PaneLayoutNode?
     let panes: [WorkspacePane]
+    let selectedPaneID: String?
+    let onSelectPane: (String) -> Void
     let onTerminalExit: (String) -> Void
     let onUpdateBrowser: (String, String) -> Void
     let onRefreshDiff: (String, String, String) -> Void
@@ -13,55 +16,61 @@ struct PaneWorkspaceView: View {
 
     var body: some View {
         Group {
-            switch panes.count {
-            case 0:
+            if panes.isEmpty {
                 ContentUnavailableView(
                     "No Panes",
                     systemImage: "rectangle.split.2x1",
-                    description: Text("Add a pane to the selected window.")
+                    description: Text("Use Ctrl+% or Ctrl+\" to split the current pane.")
                 )
-            case 1:
+            } else if let resolvedLayout = layout ?? legacyLayout {
+                layoutView(for: resolvedLayout)
+            } else {
                 paneView(for: panes[0])
-            case 2:
-                HSplitView {
-                    paneView(for: panes[0])
-                    paneView(for: panes[1])
-                }
-            case 3:
-                HSplitView {
-                    paneView(for: panes[0])
-                    VSplitView {
-                        paneView(for: panes[1])
-                        paneView(for: panes[2])
-                    }
-                }
-            case 4:
-                VSplitView {
-                    HSplitView {
-                        paneView(for: panes[0])
-                        paneView(for: panes[1])
-                    }
-                    HSplitView {
-                        paneView(for: panes[2])
-                        paneView(for: panes[3])
-                    }
-                }
-            default:
-                ScrollView {
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
-                        ForEach(panes) { pane in
-                            paneView(for: pane)
-                                .frame(minHeight: 320)
-                        }
-                    }
-                }
+            }
+        }
+    }
+
+    private var legacyLayout: PaneLayoutNode? {
+        guard let firstPane = panes.first else {
+            return nil
+        }
+
+        return panes.dropFirst().reduce(PaneLayoutNode.leaf(firstPane.id)) { partial, pane in
+            .split(axis: .vertical, primary: partial, secondary: .leaf(pane.id))
+        }
+    }
+
+    private func layoutView(for node: PaneLayoutNode) -> AnyView {
+        switch node {
+        case .leaf(let paneID):
+            if let pane = panes.first(where: { $0.id == paneID }) {
+                return AnyView(paneView(for: pane))
+            }
+            return AnyView(EmptyView())
+        case .split(let axis, let primary, let secondary):
+            if axis == .vertical {
+                return AnyView(HSplitView {
+                    layoutView(for: primary)
+                    layoutView(for: secondary)
+                })
+            } else {
+                return AnyView(VSplitView {
+                    layoutView(for: primary)
+                    layoutView(for: secondary)
+                })
             }
         }
     }
 
     @ViewBuilder
     private func paneView(for pane: WorkspacePane) -> some View {
-        PaneContainer(kind: pane.kind) {
+        PaneContainer(
+            kind: pane.kind,
+            isSelected: selectedPaneID == pane.id,
+            onSelect: {
+                onSelectPane(pane.id)
+            }
+        ) {
             switch pane.kind {
             case .terminal:
                 if let terminal = pane.terminal {
@@ -106,6 +115,8 @@ struct PaneWorkspaceView: View {
 
 struct PaneContainer<Content: View>: View {
     let kind: PaneKind
+    let isSelected: Bool
+    let onSelect: () -> Void
     @ViewBuilder let content: Content
     private let chrome = PaneChromeConfiguration.minimal
 
@@ -122,7 +133,15 @@ struct PaneContainer<Content: View>: View {
             }
         }
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
+        )
         .accessibilityIdentifier("pane-container-\(kind.rawValue)")
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onSelect()
+        }
         .overlay(
             AccessibilityTaggedView(
                 identifier: "pane-container-\(kind.rawValue)",

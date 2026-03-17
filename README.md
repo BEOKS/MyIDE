@@ -25,6 +25,32 @@ swift run MyIDESampleMacApp
 swift run MyIDECLI help
 ```
 
+## Install the CLI
+
+Install once to `~/.local/bin`:
+
+```bash
+./scripts/install-cli.sh
+```
+
+Install to a custom prefix:
+
+```bash
+./scripts/install-cli.sh /usr/local/bin
+```
+
+Remove the installed symlink:
+
+```bash
+./scripts/uninstall-cli.sh
+```
+
+After installation:
+
+```bash
+MyIDECLI help
+```
+
 ## Run the BDD suite
 
 ```bash

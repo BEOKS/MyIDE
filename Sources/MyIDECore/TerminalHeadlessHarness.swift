@@ -109,13 +109,16 @@ public enum TerminalHeadlessHarness {
     public static func checkSessionWindowSemantics() throws -> SessionWindowSemanticsResult {
         var workspace = Workspace.empty()
         let alpha = workspace.addSession(named: "Alpha")
+        _ = try workspace.addWindow(toSessionID: alpha.id, title: "Main")
         let alphaAppWindowCount = workspace.sessions.count
         let alphaSidebarWindowCount = try workspace.windowTitles(sessionID: alpha.id).count
-
-        let alphaEditor = try workspace.addWindow(toSessionID: alpha.id, title: "Editor")
         let alphaSidebarTitles = try workspace.windowTitles(sessionID: alpha.id)
 
+        let alphaEditor = try workspace.addWindow(toSessionID: alpha.id, title: "Editor")
+        let alphaSidebarTitlesAfterAddingWindow = try workspace.windowTitles(sessionID: alpha.id)
+
         let beta = workspace.addSession(named: "Beta")
+        _ = try workspace.addWindow(toSessionID: beta.id, title: "Main")
         let betaAppWindowCount = workspace.sessions.count
         let betaSidebarWindowCount = try workspace.windowTitles(sessionID: beta.id).count
         let betaSidebarTitles = try workspace.windowTitles(sessionID: beta.id)
@@ -123,8 +126,9 @@ public enum TerminalHeadlessHarness {
         return SessionWindowSemanticsResult(
             appWindowCountAfterFirstSession: alphaAppWindowCount,
             sidebarWindowCountAfterFirstSession: alphaSidebarWindowCount,
-            sidebarWindowCountAfterAddingWindow: alphaSidebarTitles.count,
-            sidebarWindowTitlesForFirstSession: alphaSidebarTitles,
+            sidebarWindowTitlesAfterFirstSessionCreation: alphaSidebarTitles,
+            sidebarWindowCountAfterAddingWindow: alphaSidebarTitlesAfterAddingWindow.count,
+            sidebarWindowTitlesForFirstSession: alphaSidebarTitlesAfterAddingWindow,
             appWindowCountAfterSecondSession: betaAppWindowCount,
             sidebarWindowCountForSecondSession: betaSidebarWindowCount,
             sidebarWindowTitlesForSecondSession: betaSidebarTitles,
@@ -220,6 +224,137 @@ public enum TerminalHeadlessHarness {
         )
     }
 
+    public static func checkAddPaneSheetIsScopedPerSessionWindow() -> AddPaneSheetScopeResult {
+        let firstWindowState = WindowSceneState()
+        let secondWindowState = WindowSceneState()
+
+        firstWindowState.showingAddPaneSheet = true
+
+        return AddPaneSheetScopeResult(
+            firstWindowShowingSheet: firstWindowState.showingAddPaneSheet,
+            secondWindowShowingSheet: secondWindowState.showingAddPaneSheet
+        )
+    }
+
+    public static func checkNewSessionStartsWithMainWindow() throws -> NewSessionDefaultsResult {
+        var workspace = Workspace.empty()
+        let session = workspace.addSession(named: "Session 1")
+        let mainWindow = try workspace.addWindow(toSessionID: session.id, title: "Main")
+        let windowTitles = try workspace.windowTitles(sessionID: session.id)
+
+        return NewSessionDefaultsResult(
+            windowCount: windowTitles.count,
+            firstWindowTitle: windowTitles.first ?? "",
+            addPaneEnabled: try workspace.window(sessionID: session.id, windowID: mainWindow.id).id == mainWindow.id
+        )
+    }
+
+    public static func checkIMECompositionCommit() -> IMECompositionResult {
+        let composition = TerminalCompositionState()
+        composition.setMarkedText("ㅎ", selectedRange: NSRange(location: 1, length: 0))
+        let firstMarkedRange = composition.markedRange()
+        let hadMarkedTextDuringComposition = composition.hasMarkedText
+
+        composition.setMarkedText("하", selectedRange: NSRange(location: 1, length: 0))
+        let updatedMarkedRange = composition.markedRange()
+        let committedText = composition.committedText(from: "한") ?? ""
+        let hasMarkedTextAfterCommit = composition.hasMarkedText
+
+        return IMECompositionResult(
+            hadMarkedTextDuringComposition: hadMarkedTextDuringComposition,
+            firstMarkedRangeLength: firstMarkedRange.length,
+            updatedMarkedRangeLength: updatedMarkedRange.length,
+            committedText: committedText,
+            hasMarkedTextAfterCommit: hasMarkedTextAfterCommit
+        )
+    }
+
+    public static func checkDeleteToBeginningOfLineShortcut() throws -> TerminalShortcutResult {
+        let transcript = TerminalTranscriptBuffer()
+        let session = PTYTerminalSession(
+            configuration: .init(
+                workingDirectory: FileManager.default.currentDirectoryPath,
+                shellPath: "/bin/zsh",
+                prompt: prompt
+            )
+        )
+
+        session.onData = { data in
+            _ = transcript.append(data)
+        }
+
+        try session.start()
+        defer { session.stop() }
+
+        guard waitUntil(timeout: 5, body: { transcript.text.contains(prompt) ? true : nil }) != nil else {
+            throw TerminalUITestError.transcriptExpectationFailed(prompt)
+        }
+
+        session.write("garbage")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        session.write(Data(TerminalShortcutAction.deleteToBeginningOfLine.bytes))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        session.write("printf 'ok'\n")
+
+        guard let finalTranscript = waitUntil(timeout: 5, body: {
+            transcript.text.contains("ok") ? transcript.text : nil
+        }) else {
+            throw TerminalUITestError.transcriptExpectationFailed("ok")
+        }
+
+        let succeeded = finalTranscript.contains("ok") && !finalTranscript.contains("garbageprintf")
+        return TerminalShortcutResult(
+            transcript: finalTranscript,
+            succeeded: succeeded
+        )
+    }
+
+    public static func checkTmuxSplitShortcuts() throws -> TmuxSplitShortcutResult {
+        var workspace = Workspace.empty()
+        let session = workspace.addSession(named: "Session 1")
+        let window = try workspace.addWindow(toSessionID: session.id, title: "Main")
+        let rootPane = WorkspacePane.terminal(
+            title: "Shell",
+            provider: .terminal,
+            workingDirectory: FileManager.default.currentDirectoryPath
+        )
+        try workspace.addPane(rootPane, toSessionID: session.id, windowID: window.id)
+
+        let verticalPane = WorkspacePane.terminal(
+            title: "Vertical Split",
+            provider: .terminal,
+            workingDirectory: FileManager.default.currentDirectoryPath
+        )
+        _ = try workspace.splitPane(
+            sessionID: session.id,
+            windowID: window.id,
+            paneID: rootPane.id,
+            axis: .vertical,
+            newPane: verticalPane
+        )
+
+        let layoutAfterVertical = try workspace.window(sessionID: session.id, windowID: window.id).layout
+        let horizontalPane = WorkspacePane.terminal(
+            title: "Horizontal Split",
+            provider: .terminal,
+            workingDirectory: FileManager.default.currentDirectoryPath
+        )
+        _ = try workspace.splitPane(
+            sessionID: session.id,
+            windowID: window.id,
+            paneID: verticalPane.id,
+            axis: .horizontal,
+            newPane: horizontalPane
+        )
+
+        let finalWindow = try workspace.window(sessionID: session.id, windowID: window.id)
+        return TmuxSplitShortcutResult(
+            paneCount: finalWindow.panes.count,
+            rootAxisAfterVerticalSplit: axisName(of: layoutAfterVertical),
+            finalLayoutDescription: describe(layout: finalWindow.layout)
+        )
+    }
+
     private static func terminalSnapshot(from terminal: HeadlessTerminal) -> String {
         String(decoding: terminal.terminal.getBufferAsData(), as: UTF8.self)
     }
@@ -255,11 +390,46 @@ public enum TerminalHeadlessHarness {
 
     private static let shellPath = "/bin/zsh"
     private static let prompt = "MYIDE> "
+
+    private static func axisName(of layout: PaneLayoutNode?) -> String? {
+        guard case .split(let axis, _, _) = layout else {
+            return nil
+        }
+
+        return axis.rawValue
+    }
+
+    private static func describe(layout: PaneLayoutNode?) -> String {
+        guard let layout else {
+            return "empty"
+        }
+
+        switch layout {
+        case .leaf(let paneID):
+            return "leaf(\(paneID))"
+        case .split(let axis, let primary, let secondary):
+            return "\(axis.rawValue)(\(describe(layout: primary)),\(describe(layout: secondary)))"
+        }
+    }
+
+    private static func waitUntil<T>(timeout: TimeInterval, pollInterval: TimeInterval = 0.05, body: () -> T?) -> T? {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let value = body() {
+                return value
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(pollInterval))
+        }
+
+        return nil
+    }
 }
 
 public struct SessionWindowSemanticsResult: Codable, Sendable {
     public var appWindowCountAfterFirstSession: Int
     public var sidebarWindowCountAfterFirstSession: Int
+    public var sidebarWindowTitlesAfterFirstSessionCreation: [String]
     public var sidebarWindowCountAfterAddingWindow: Int
     public var sidebarWindowTitlesForFirstSession: [String]
     public var appWindowCountAfterSecondSession: Int
@@ -270,6 +440,7 @@ public struct SessionWindowSemanticsResult: Codable, Sendable {
     public init(
         appWindowCountAfterFirstSession: Int,
         sidebarWindowCountAfterFirstSession: Int,
+        sidebarWindowTitlesAfterFirstSessionCreation: [String],
         sidebarWindowCountAfterAddingWindow: Int,
         sidebarWindowTitlesForFirstSession: [String],
         appWindowCountAfterSecondSession: Int,
@@ -279,12 +450,57 @@ public struct SessionWindowSemanticsResult: Codable, Sendable {
     ) {
         self.appWindowCountAfterFirstSession = appWindowCountAfterFirstSession
         self.sidebarWindowCountAfterFirstSession = sidebarWindowCountAfterFirstSession
+        self.sidebarWindowTitlesAfterFirstSessionCreation = sidebarWindowTitlesAfterFirstSessionCreation
         self.sidebarWindowCountAfterAddingWindow = sidebarWindowCountAfterAddingWindow
         self.sidebarWindowTitlesForFirstSession = sidebarWindowTitlesForFirstSession
         self.appWindowCountAfterSecondSession = appWindowCountAfterSecondSession
         self.sidebarWindowCountForSecondSession = sidebarWindowCountForSecondSession
         self.sidebarWindowTitlesForSecondSession = sidebarWindowTitlesForSecondSession
         self.firstAddedWindowTitle = firstAddedWindowTitle
+    }
+}
+
+public struct NewSessionDefaultsResult: Codable, Sendable {
+    public var windowCount: Int
+    public var firstWindowTitle: String
+    public var addPaneEnabled: Bool
+
+    public init(windowCount: Int, firstWindowTitle: String, addPaneEnabled: Bool) {
+        self.windowCount = windowCount
+        self.firstWindowTitle = firstWindowTitle
+        self.addPaneEnabled = addPaneEnabled
+    }
+}
+
+public struct IMECompositionResult: Codable, Sendable {
+    public var hadMarkedTextDuringComposition: Bool
+    public var firstMarkedRangeLength: Int
+    public var updatedMarkedRangeLength: Int
+    public var committedText: String
+    public var hasMarkedTextAfterCommit: Bool
+
+    public init(
+        hadMarkedTextDuringComposition: Bool,
+        firstMarkedRangeLength: Int,
+        updatedMarkedRangeLength: Int,
+        committedText: String,
+        hasMarkedTextAfterCommit: Bool
+    ) {
+        self.hadMarkedTextDuringComposition = hadMarkedTextDuringComposition
+        self.firstMarkedRangeLength = firstMarkedRangeLength
+        self.updatedMarkedRangeLength = updatedMarkedRangeLength
+        self.committedText = committedText
+        self.hasMarkedTextAfterCommit = hasMarkedTextAfterCommit
+    }
+}
+
+public struct TerminalShortcutResult: Codable, Sendable {
+    public var transcript: String
+    public var succeeded: Bool
+
+    public init(transcript: String, succeeded: Bool) {
+        self.transcript = transcript
+        self.succeeded = succeeded
     }
 }
 
@@ -326,5 +542,27 @@ public struct WindowReselectionRegressionResult: Codable, Sendable {
         self.mainPaneTitlesBeforeSwitch = mainPaneTitlesBeforeSwitch
         self.mainPaneTitlesAfterReturn = mainPaneTitlesAfterReturn
         self.canReturnToMainWithoutError = canReturnToMainWithoutError
+    }
+}
+
+public struct AddPaneSheetScopeResult: Codable, Sendable {
+    public var firstWindowShowingSheet: Bool
+    public var secondWindowShowingSheet: Bool
+
+    public init(firstWindowShowingSheet: Bool, secondWindowShowingSheet: Bool) {
+        self.firstWindowShowingSheet = firstWindowShowingSheet
+        self.secondWindowShowingSheet = secondWindowShowingSheet
+    }
+}
+
+public struct TmuxSplitShortcutResult: Codable, Sendable {
+    public var paneCount: Int
+    public var rootAxisAfterVerticalSplit: String?
+    public var finalLayoutDescription: String
+
+    public init(paneCount: Int, rootAxisAfterVerticalSplit: String?, finalLayoutDescription: String) {
+        self.paneCount = paneCount
+        self.rootAxisAfterVerticalSplit = rootAxisAfterVerticalSplit
+        self.finalLayoutDescription = finalLayoutDescription
     }
 }

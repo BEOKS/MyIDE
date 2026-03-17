@@ -8,6 +8,57 @@ public enum PaneKind: String, Codable, CaseIterable {
     case imagePreview
 }
 
+public enum PaneSplitAxis: String, Codable, Sendable {
+    case vertical
+    case horizontal
+}
+
+public indirect enum PaneLayoutNode: Codable, Sendable, Equatable {
+    case leaf(String)
+    case split(axis: PaneSplitAxis, primary: PaneLayoutNode, secondary: PaneLayoutNode)
+
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case paneID
+        case axis
+        case primary
+        case secondary
+    }
+
+    private enum NodeKind: String, Codable {
+        case leaf
+        case split
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(NodeKind.self, forKey: .kind) {
+        case .leaf:
+            self = .leaf(try container.decode(String.self, forKey: .paneID))
+        case .split:
+            self = .split(
+                axis: try container.decode(PaneSplitAxis.self, forKey: .axis),
+                primary: try container.decode(PaneLayoutNode.self, forKey: .primary),
+                secondary: try container.decode(PaneLayoutNode.self, forKey: .secondary)
+            )
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .leaf(let paneID):
+            try container.encode(NodeKind.leaf, forKey: .kind)
+            try container.encode(paneID, forKey: .paneID)
+        case .split(let axis, let primary, let secondary):
+            try container.encode(NodeKind.split, forKey: .kind)
+            try container.encode(axis, forKey: .axis)
+            try container.encode(primary, forKey: .primary)
+            try container.encode(secondary, forKey: .secondary)
+        }
+    }
+}
+
 public struct PaneChromeConfiguration: Codable, Sendable {
     public var showsTitle: Bool
     public var showsCloseButton: Bool
@@ -66,7 +117,7 @@ public struct Workspace: Codable {
             provider: .terminal,
             workingDirectory: FileManager.default.currentDirectoryPath
         )
-        let window = WorkspaceWindow(title: "Main", panes: [shell])
+        let window = WorkspaceWindow(title: "Main", panes: [shell], layout: .leaf(shell.id))
         let session = WorkspaceSession(name: "Main Session", windows: [window])
         return Workspace(sessions: [session])
     }
@@ -105,28 +156,52 @@ public struct Workspace: Codable {
         return session
     }
 
+    public mutating func updateSession(
+        sessionID: String,
+        using update: (inout WorkspaceSession) throws -> Void
+    ) throws {
+        let sessionIndex = try requireSessionIndex(sessionID: sessionID)
+        try update(&sessions[sessionIndex])
+    }
+
+    public mutating func removeSession(sessionID: String) throws {
+        let sessionIndex = try requireSessionIndex(sessionID: sessionID)
+        sessions.remove(at: sessionIndex)
+    }
+
     @discardableResult
     public mutating func addWindow(toSessionID sessionID: String, title: String) throws -> WorkspaceWindow {
-        guard let sessionIndex = sessions.firstIndex(where: { $0.id == sessionID }) else {
-            throw WorkspaceError.sessionNotFound(sessionID)
-        }
-
+        let sessionIndex = try requireSessionIndex(sessionID: sessionID)
         let window = WorkspaceWindow(title: title, panes: [])
         sessions[sessionIndex].windows.append(window)
         return window
     }
 
+    public mutating func updateWindow(
+        sessionID: String,
+        windowID: String,
+        using update: (inout WorkspaceWindow) throws -> Void
+    ) throws {
+        let sessionIndex = try requireSessionIndex(sessionID: sessionID)
+        let windowIndex = try requireWindowIndex(sessionIndex: sessionIndex, windowID: windowID)
+        try update(&sessions[sessionIndex].windows[windowIndex])
+    }
+
+    public mutating func removeWindow(sessionID: String, windowID: String) throws {
+        let sessionIndex = try requireSessionIndex(sessionID: sessionID)
+        let windowIndex = try requireWindowIndex(sessionIndex: sessionIndex, windowID: windowID)
+        sessions[sessionIndex].windows.remove(at: windowIndex)
+    }
+
     @discardableResult
     public mutating func addPane(_ pane: WorkspacePane, toSessionID sessionID: String, windowID: String) throws -> WorkspacePane {
-        guard let sessionIndex = sessions.firstIndex(where: { $0.id == sessionID }) else {
-            throw WorkspaceError.sessionNotFound(sessionID)
-        }
-
-        guard let windowIndex = sessions[sessionIndex].windows.firstIndex(where: { $0.id == windowID }) else {
-            throw WorkspaceError.windowNotFound(windowID)
-        }
-
+        let sessionIndex = try requireSessionIndex(sessionID: sessionID)
+        let windowIndex = try requireWindowIndex(sessionIndex: sessionIndex, windowID: windowID)
         sessions[sessionIndex].windows[windowIndex].panes.append(pane)
+        if sessions[sessionIndex].windows[windowIndex].layout == nil,
+           sessions[sessionIndex].windows[windowIndex].panes.count == 1 {
+            sessions[sessionIndex].windows[windowIndex].layout = .leaf(pane.id)
+        }
         return pane
     }
 
@@ -136,31 +211,49 @@ public struct Workspace: Codable {
         paneID: String,
         using update: (inout WorkspacePane) throws -> Void
     ) throws {
-        guard let sessionIndex = sessions.firstIndex(where: { $0.id == sessionID }) else {
-            throw WorkspaceError.sessionNotFound(sessionID)
-        }
-
-        guard let windowIndex = sessions[sessionIndex].windows.firstIndex(where: { $0.id == windowID }) else {
-            throw WorkspaceError.windowNotFound(windowID)
-        }
-
-        guard let paneIndex = sessions[sessionIndex].windows[windowIndex].panes.firstIndex(where: { $0.id == paneID }) else {
-            throw WorkspaceError.paneNotFound(paneID)
-        }
-
+        let sessionIndex = try requireSessionIndex(sessionID: sessionID)
+        let windowIndex = try requireWindowIndex(sessionIndex: sessionIndex, windowID: windowID)
+        let paneIndex = try requirePaneIndex(sessionIndex: sessionIndex, windowIndex: windowIndex, paneID: paneID)
         try update(&sessions[sessionIndex].windows[windowIndex].panes[paneIndex])
     }
 
     public mutating func removePane(sessionID: String, windowID: String, paneID: String) throws {
-        guard let sessionIndex = sessions.firstIndex(where: { $0.id == sessionID }) else {
-            throw WorkspaceError.sessionNotFound(sessionID)
+        let sessionIndex = try requireSessionIndex(sessionID: sessionID)
+        let windowIndex = try requireWindowIndex(sessionIndex: sessionIndex, windowID: windowID)
+        let paneIndex = try requirePaneIndex(sessionIndex: sessionIndex, windowIndex: windowIndex, paneID: paneID)
+        sessions[sessionIndex].windows[windowIndex].panes.remove(at: paneIndex)
+        if let layout = sessions[sessionIndex].windows[windowIndex].layout {
+            sessions[sessionIndex].windows[windowIndex].layout = removePaneFromLayout(layout, paneID: paneID)
         }
+    }
 
-        guard let windowIndex = sessions[sessionIndex].windows.firstIndex(where: { $0.id == windowID }) else {
-            throw WorkspaceError.windowNotFound(windowID)
-        }
+    @discardableResult
+    public mutating func splitPane(
+        sessionID: String,
+        windowID: String,
+        paneID: String?,
+        axis: PaneSplitAxis,
+        newPane: WorkspacePane
+    ) throws -> WorkspacePane {
+        let sessionIndex = try requireSessionIndex(sessionID: sessionID)
+        let windowIndex = try requireWindowIndex(sessionIndex: sessionIndex, windowID: windowID)
+        sessions[sessionIndex].windows[windowIndex].panes.append(newPane)
 
-        sessions[sessionIndex].windows[windowIndex].panes.removeAll { $0.id == paneID }
+        let existingPanes = sessions[sessionIndex].windows[windowIndex].panes
+        let fallbackPaneID = paneID
+            ?? existingPanes.dropLast().last?.id
+            ?? newPane.id
+        let currentLayout = sessions[sessionIndex].windows[windowIndex].layout
+            ?? legacyLayout(for: Array(existingPanes.dropLast()))
+
+        sessions[sessionIndex].windows[windowIndex].layout = insertPaneIntoLayout(
+            currentLayout,
+            targetPaneID: fallbackPaneID,
+            axis: axis,
+            newPaneID: newPane.id
+        )
+
+        return newPane
     }
 
     private func windowList(sessionID: String) throws -> [WorkspaceWindow] {
@@ -169,6 +262,86 @@ public struct Workspace: Codable {
         }
 
         return session.windows
+    }
+
+    private func requireSessionIndex(sessionID: String) throws -> Int {
+        guard let sessionIndex = sessions.firstIndex(where: { $0.id == sessionID }) else {
+            throw WorkspaceError.sessionNotFound(sessionID)
+        }
+
+        return sessionIndex
+    }
+
+    private func requireWindowIndex(sessionIndex: Int, windowID: String) throws -> Int {
+        guard let windowIndex = sessions[sessionIndex].windows.firstIndex(where: { $0.id == windowID }) else {
+            throw WorkspaceError.windowNotFound(windowID)
+        }
+
+        return windowIndex
+    }
+
+    private func requirePaneIndex(sessionIndex: Int, windowIndex: Int, paneID: String) throws -> Int {
+        guard let paneIndex = sessions[sessionIndex].windows[windowIndex].panes.firstIndex(where: { $0.id == paneID }) else {
+            throw WorkspaceError.paneNotFound(paneID)
+        }
+
+        return paneIndex
+    }
+
+    private func legacyLayout(for panes: [WorkspacePane]) -> PaneLayoutNode? {
+        guard let firstPane = panes.first else {
+            return nil
+        }
+
+        return panes.dropFirst().reduce(PaneLayoutNode.leaf(firstPane.id)) { partial, pane in
+            .split(axis: .vertical, primary: partial, secondary: .leaf(pane.id))
+        }
+    }
+
+    private func insertPaneIntoLayout(
+        _ layout: PaneLayoutNode?,
+        targetPaneID: String,
+        axis: PaneSplitAxis,
+        newPaneID: String
+    ) -> PaneLayoutNode {
+        guard let layout else {
+            return .leaf(newPaneID)
+        }
+
+        switch layout {
+        case .leaf(let paneID):
+            if paneID == targetPaneID {
+                return .split(axis: axis, primary: .leaf(paneID), secondary: .leaf(newPaneID))
+            }
+            return layout
+        case .split(let splitAxis, let primary, let secondary):
+            let updatedPrimary = insertPaneIntoLayout(primary, targetPaneID: targetPaneID, axis: axis, newPaneID: newPaneID)
+            if updatedPrimary != primary {
+                return .split(axis: splitAxis, primary: updatedPrimary, secondary: secondary)
+            }
+
+            let updatedSecondary = insertPaneIntoLayout(secondary, targetPaneID: targetPaneID, axis: axis, newPaneID: newPaneID)
+            return .split(axis: splitAxis, primary: primary, secondary: updatedSecondary)
+        }
+    }
+
+    private func removePaneFromLayout(_ layout: PaneLayoutNode, paneID: String) -> PaneLayoutNode? {
+        switch layout {
+        case .leaf(let id):
+            return id == paneID ? nil : layout
+        case .split(let axis, let primary, let secondary):
+            let updatedPrimary = removePaneFromLayout(primary, paneID: paneID)
+            let updatedSecondary = removePaneFromLayout(secondary, paneID: paneID)
+
+            switch (updatedPrimary, updatedSecondary) {
+            case (nil, nil):
+                return nil
+            case (let remaining?, nil), (nil, let remaining?):
+                return remaining
+            case (let primary?, let secondary?):
+                return .split(axis: axis, primary: primary, secondary: secondary)
+            }
+        }
     }
 }
 
@@ -188,11 +361,13 @@ public struct WorkspaceWindow: Codable, Identifiable {
     public var id: String
     public var title: String
     public var panes: [WorkspacePane]
+    public var layout: PaneLayoutNode?
 
-    public init(id: String = UUID().uuidString, title: String, panes: [WorkspacePane] = []) {
+    public init(id: String = UUID().uuidString, title: String, panes: [WorkspacePane] = [], layout: PaneLayoutNode? = nil) {
         self.id = id
         self.title = title
         self.panes = panes
+        self.layout = layout
     }
 }
 

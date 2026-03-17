@@ -38,6 +38,14 @@ private struct CLI {
             let workspaceURL = try workspaceURL(from: options)
             let workspace = try WorkspaceStore.load(from: workspaceURL)
             try printJSON(workspace)
+        case "show-session":
+            let workspaceURL = try workspaceURL(from: options)
+            let workspace = try WorkspaceStore.load(from: workspaceURL)
+            let sessionID = try requiredOption("session-id", in: options)
+            guard let session = workspace.session(withID: sessionID) else {
+                throw WorkspaceError.sessionNotFound(sessionID)
+            }
+            try printJSON(session)
         case "add-session":
             let workspaceURL = try workspaceURL(from: options)
             var workspace = try WorkspaceStore.load(from: workspaceURL)
@@ -45,6 +53,26 @@ private struct CLI {
             let session = workspace.addSession(named: name)
             try WorkspaceStore.save(workspace, to: workspaceURL)
             try printJSON(session)
+        case "update-session":
+            let workspaceURL = try workspaceURL(from: options)
+            var workspace = try WorkspaceStore.load(from: workspaceURL)
+            let sessionID = try requiredOption("session-id", in: options)
+            let name = try requiredOption("name", in: options)
+            try workspace.updateSession(sessionID: sessionID) { session in
+                session.name = name
+            }
+            try WorkspaceStore.save(workspace, to: workspaceURL)
+            guard let session = workspace.session(withID: sessionID) else {
+                throw WorkspaceError.sessionNotFound(sessionID)
+            }
+            try printJSON(session)
+        case "delete-session":
+            let workspaceURL = try workspaceURL(from: options)
+            var workspace = try WorkspaceStore.load(from: workspaceURL)
+            let sessionID = try requiredOption("session-id", in: options)
+            try workspace.removeSession(sessionID: sessionID)
+            try WorkspaceStore.save(workspace, to: workspaceURL)
+            try printJSON(workspace)
         case "add-window":
             let workspaceURL = try workspaceURL(from: options)
             var workspace = try WorkspaceStore.load(from: workspaceURL)
@@ -53,6 +81,31 @@ private struct CLI {
             let window = try workspace.addWindow(toSessionID: sessionID, title: title)
             try WorkspaceStore.save(workspace, to: workspaceURL)
             try printJSON(window)
+        case "show-window":
+            let workspaceURL = try workspaceURL(from: options)
+            let workspace = try WorkspaceStore.load(from: workspaceURL)
+            let sessionID = try requiredOption("session-id", in: options)
+            let windowID = try requiredOption("window-id", in: options)
+            try printJSON(try workspace.window(sessionID: sessionID, windowID: windowID))
+        case "update-window":
+            let workspaceURL = try workspaceURL(from: options)
+            var workspace = try WorkspaceStore.load(from: workspaceURL)
+            let sessionID = try requiredOption("session-id", in: options)
+            let windowID = try requiredOption("window-id", in: options)
+            let title = try requiredOption("title", in: options)
+            try workspace.updateWindow(sessionID: sessionID, windowID: windowID) { window in
+                window.title = title
+            }
+            try WorkspaceStore.save(workspace, to: workspaceURL)
+            try printJSON(try workspace.window(sessionID: sessionID, windowID: windowID))
+        case "delete-window":
+            let workspaceURL = try workspaceURL(from: options)
+            var workspace = try WorkspaceStore.load(from: workspaceURL)
+            let sessionID = try requiredOption("session-id", in: options)
+            let windowID = try requiredOption("window-id", in: options)
+            try workspace.removeWindow(sessionID: sessionID, windowID: windowID)
+            try WorkspaceStore.save(workspace, to: workspaceURL)
+            try printJSON(try sessionPayload(workspace: workspace, sessionID: sessionID))
         case "add-pane":
             let workspaceURL = try workspaceURL(from: options)
             var workspace = try WorkspaceStore.load(from: workspaceURL)
@@ -62,6 +115,33 @@ private struct CLI {
             try workspace.addPane(pane, toSessionID: sessionID, windowID: windowID)
             try WorkspaceStore.save(workspace, to: workspaceURL)
             try printJSON(pane)
+        case "show-pane":
+            let workspaceURL = try workspaceURL(from: options)
+            let workspace = try WorkspaceStore.load(from: workspaceURL)
+            let sessionID = try requiredOption("session-id", in: options)
+            let windowID = try requiredOption("window-id", in: options)
+            let paneID = try requiredOption("pane-id", in: options)
+            try printJSON(try workspace.pane(sessionID: sessionID, windowID: windowID, paneID: paneID))
+        case "update-pane":
+            let workspaceURL = try workspaceURL(from: options)
+            var workspace = try WorkspaceStore.load(from: workspaceURL)
+            let sessionID = try requiredOption("session-id", in: options)
+            let windowID = try requiredOption("window-id", in: options)
+            let paneID = try requiredOption("pane-id", in: options)
+            try workspace.updatePane(sessionID: sessionID, windowID: windowID, paneID: paneID) { pane in
+                try applyPaneUpdates(to: &pane, options: options)
+            }
+            try WorkspaceStore.save(workspace, to: workspaceURL)
+            try printJSON(try workspace.pane(sessionID: sessionID, windowID: windowID, paneID: paneID))
+        case "delete-pane":
+            let workspaceURL = try workspaceURL(from: options)
+            var workspace = try WorkspaceStore.load(from: workspaceURL)
+            let sessionID = try requiredOption("session-id", in: options)
+            let windowID = try requiredOption("window-id", in: options)
+            let paneID = try requiredOption("pane-id", in: options)
+            try workspace.removePane(sessionID: sessionID, windowID: windowID, paneID: paneID)
+            try WorkspaceStore.save(workspace, to: workspaceURL)
+            try printJSON(try workspace.window(sessionID: sessionID, windowID: windowID))
         case "run-terminal":
             let workspaceURL = try workspaceURL(from: options)
             var workspace = try WorkspaceStore.load(from: workspaceURL)
@@ -143,6 +223,21 @@ private struct CLI {
         case "headless-check-main-window-reselection-regression":
             let result = try TerminalHeadlessHarness.checkMainWindowReselectionRegression()
             try printJSON(result)
+        case "headless-check-add-pane-sheet-scope":
+            let result = TerminalHeadlessHarness.checkAddPaneSheetIsScopedPerSessionWindow()
+            try printJSON(result)
+        case "headless-check-new-session-defaults":
+            let result = try TerminalHeadlessHarness.checkNewSessionStartsWithMainWindow()
+            try printJSON(result)
+        case "headless-check-ime-composition":
+            let result = TerminalHeadlessHarness.checkIMECompositionCommit()
+            try printJSON(result)
+        case "headless-check-delete-line-shortcut":
+            let result = try TerminalHeadlessHarness.checkDeleteToBeginningOfLineShortcut()
+            try printJSON(result)
+        case "headless-check-tmux-split-shortcuts":
+            let result = try TerminalHeadlessHarness.checkTmuxSplitShortcuts()
+            try printJSON(result)
         case "debug-terminal-ancestry":
             let appURL = URL(fileURLWithPath: CommandLine.arguments[0])
                 .deletingLastPathComponent()
@@ -178,6 +273,74 @@ private struct CLI {
         default:
             throw WorkspaceError.invalidPane("Unsupported pane kind: \(kindValue)")
         }
+    }
+
+    private func applyPaneUpdates(to pane: inout WorkspacePane, options: [String: String]) throws {
+        if let title = options["title"], !title.isEmpty {
+            pane.title = title
+        }
+
+        switch pane.kind {
+        case .terminal:
+            guard var terminal = pane.terminal else {
+                throw WorkspaceError.invalidPane("Terminal pane is not configured")
+            }
+
+            if let providerValue = options["provider"], !providerValue.isEmpty {
+                guard let provider = TerminalProvider(rawValue: providerValue) else {
+                    throw WorkspaceError.invalidPane("Unsupported terminal provider: \(providerValue)")
+                }
+                terminal.provider = provider
+            }
+
+            if let workingDirectory = options["working-directory"], !workingDirectory.isEmpty {
+                terminal.workingDirectory = workingDirectory
+            }
+
+            pane.terminal = terminal
+        case .browser:
+            guard var browser = pane.browser else {
+                throw WorkspaceError.invalidPane("Browser pane is not configured")
+            }
+
+            if let url = options["url"], !url.isEmpty {
+                browser.urlString = url
+            }
+
+            pane.browser = browser
+        case .diff:
+            guard var diff = pane.diff else {
+                throw WorkspaceError.invalidPane("Diff pane is not configured")
+            }
+
+            if let leftPath = options["left"], !leftPath.isEmpty {
+                diff.leftPath = leftPath
+            }
+
+            if let rightPath = options["right"], !rightPath.isEmpty {
+                diff.rightPath = rightPath
+            }
+
+            pane.diff = diff
+        case .markdownPreview, .imagePreview:
+            guard var preview = pane.preview else {
+                throw WorkspaceError.invalidPane("Preview pane is not configured")
+            }
+
+            if let file = options["file"], !file.isEmpty {
+                preview.filePath = file
+            }
+
+            pane.preview = preview
+        }
+    }
+
+    private func sessionPayload(workspace: Workspace, sessionID: String) throws -> WorkspaceSession {
+        guard let session = workspace.session(withID: sessionID) else {
+            throw WorkspaceError.sessionNotFound(sessionID)
+        }
+
+        return session
     }
 
     private func defaultTitle(for kindValue: String) -> String {
@@ -247,9 +410,18 @@ private struct CLI {
     MyIDECLI commands:
       init --workspace PATH
       show --workspace PATH
+      show-session --workspace PATH --session-id ID
       add-session --workspace PATH --name NAME
+      update-session --workspace PATH --session-id ID --name NAME
+      delete-session --workspace PATH --session-id ID
+      show-window --workspace PATH --session-id ID --window-id ID
       add-window --workspace PATH --session-id ID --title TITLE
+      update-window --workspace PATH --session-id ID --window-id ID --title TITLE
+      delete-window --workspace PATH --session-id ID --window-id ID
+      show-pane --workspace PATH --session-id ID --window-id ID --pane-id ID
       add-pane --workspace PATH --session-id ID --window-id ID --kind terminal|browser|diff|markdown|image [options]
+      update-pane --workspace PATH --session-id ID --window-id ID --pane-id ID [--title TITLE] [--provider PROVIDER] [--working-directory PATH] [--url URL] [--left PATH] [--right PATH] [--file PATH]
+      delete-pane --workspace PATH --session-id ID --window-id ID --pane-id ID
       run-terminal --workspace PATH --session-id ID --window-id ID --pane-id ID --command COMMAND
       refresh-diff --workspace PATH --session-id ID --window-id ID --pane-id ID
       render-markdown --file PATH
@@ -264,5 +436,10 @@ private struct CLI {
       headless-check-session-window-semantics
       headless-check-empty-window-switch
       headless-check-main-window-reselection-regression
+      headless-check-add-pane-sheet-scope
+      headless-check-new-session-defaults
+      headless-check-ime-composition
+      headless-check-delete-line-shortcut
+      headless-check-tmux-split-shortcuts
     """
 }
