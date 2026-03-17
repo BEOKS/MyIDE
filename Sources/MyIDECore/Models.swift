@@ -15,12 +15,13 @@ public enum PaneSplitAxis: String, Codable, Sendable {
 
 public indirect enum PaneLayoutNode: Codable, Sendable, Equatable {
     case leaf(String)
-    case split(axis: PaneSplitAxis, primary: PaneLayoutNode, secondary: PaneLayoutNode)
+    case split(axis: PaneSplitAxis, ratio: Double, primary: PaneLayoutNode, secondary: PaneLayoutNode)
 
     private enum CodingKeys: String, CodingKey {
         case kind
         case paneID
         case axis
+        case ratio
         case primary
         case secondary
     }
@@ -38,6 +39,7 @@ public indirect enum PaneLayoutNode: Codable, Sendable, Equatable {
         case .split:
             self = .split(
                 axis: try container.decode(PaneSplitAxis.self, forKey: .axis),
+                ratio: try container.decodeIfPresent(Double.self, forKey: .ratio) ?? 0.5,
                 primary: try container.decode(PaneLayoutNode.self, forKey: .primary),
                 secondary: try container.decode(PaneLayoutNode.self, forKey: .secondary)
             )
@@ -50,9 +52,10 @@ public indirect enum PaneLayoutNode: Codable, Sendable, Equatable {
         case .leaf(let paneID):
             try container.encode(NodeKind.leaf, forKey: .kind)
             try container.encode(paneID, forKey: .paneID)
-        case .split(let axis, let primary, let secondary):
+        case .split(let axis, let ratio, let primary, let secondary):
             try container.encode(NodeKind.split, forKey: .kind)
             try container.encode(axis, forKey: .axis)
+            try container.encode(ratio, forKey: .ratio)
             try container.encode(primary, forKey: .primary)
             try container.encode(secondary, forKey: .secondary)
         }
@@ -294,7 +297,7 @@ public struct Workspace: Codable {
         }
 
         return panes.dropFirst().reduce(PaneLayoutNode.leaf(firstPane.id)) { partial, pane in
-            .split(axis: .vertical, primary: partial, secondary: .leaf(pane.id))
+            .split(axis: .vertical, ratio: 0.5, primary: partial, secondary: .leaf(pane.id))
         }
     }
 
@@ -311,17 +314,17 @@ public struct Workspace: Codable {
         switch layout {
         case .leaf(let paneID):
             if paneID == targetPaneID {
-                return .split(axis: axis, primary: .leaf(paneID), secondary: .leaf(newPaneID))
+                return .split(axis: axis, ratio: 0.5, primary: .leaf(paneID), secondary: .leaf(newPaneID))
             }
             return layout
-        case .split(let splitAxis, let primary, let secondary):
+        case .split(let splitAxis, let splitRatio, let primary, let secondary):
             let updatedPrimary = insertPaneIntoLayout(primary, targetPaneID: targetPaneID, axis: axis, newPaneID: newPaneID)
             if updatedPrimary != primary {
-                return .split(axis: splitAxis, primary: updatedPrimary, secondary: secondary)
+                return .split(axis: splitAxis, ratio: splitRatio, primary: updatedPrimary, secondary: secondary)
             }
 
             let updatedSecondary = insertPaneIntoLayout(secondary, targetPaneID: targetPaneID, axis: axis, newPaneID: newPaneID)
-            return .split(axis: splitAxis, primary: primary, secondary: updatedSecondary)
+            return .split(axis: splitAxis, ratio: splitRatio, primary: primary, secondary: updatedSecondary)
         }
     }
 
@@ -329,7 +332,7 @@ public struct Workspace: Codable {
         switch layout {
         case .leaf(let id):
             return id == paneID ? nil : layout
-        case .split(let axis, let primary, let secondary):
+        case .split(let axis, let ratio, let primary, let secondary):
             let updatedPrimary = removePaneFromLayout(primary, paneID: paneID)
             let updatedSecondary = removePaneFromLayout(secondary, paneID: paneID)
 
@@ -339,7 +342,7 @@ public struct Workspace: Codable {
             case (let remaining?, nil), (nil, let remaining?):
                 return remaining
             case (let primary?, let secondary?):
-                return .split(axis: axis, primary: primary, secondary: secondary)
+                return .split(axis: axis, ratio: ratio, primary: primary, secondary: secondary)
             }
         }
     }

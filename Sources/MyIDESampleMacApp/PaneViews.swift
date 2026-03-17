@@ -3,6 +3,37 @@ import SwiftUI
 import UniformTypeIdentifiers
 import MyIDECore
 
+struct ProportionalSplitView<Primary: View, Secondary: View>: View {
+    let axis: PaneSplitAxis
+    let ratio: Double
+    @ViewBuilder let primary: Primary
+    @ViewBuilder let secondary: Secondary
+
+    var body: some View {
+        GeometryReader { geometry in
+            if axis == .vertical {
+                HStack(spacing: 1) {
+                    primary
+                        .frame(width: geometry.size.width * ratio)
+                        .frame(maxHeight: .infinity)
+                    Divider()
+                    secondary
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            } else {
+                VStack(spacing: 1) {
+                    primary
+                        .frame(height: geometry.size.height * ratio)
+                        .frame(maxWidth: .infinity)
+                    Divider()
+                    secondary
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+    }
+}
+
 struct PaneWorkspaceView: View {
     let layout: PaneLayoutNode?
     let panes: [WorkspacePane]
@@ -36,7 +67,7 @@ struct PaneWorkspaceView: View {
         }
 
         return panes.dropFirst().reduce(PaneLayoutNode.leaf(firstPane.id)) { partial, pane in
-            .split(axis: .vertical, primary: partial, secondary: .leaf(pane.id))
+            .split(axis: .vertical, ratio: 0.5, primary: partial, secondary: .leaf(pane.id))
         }
     }
 
@@ -47,18 +78,14 @@ struct PaneWorkspaceView: View {
                 return AnyView(paneView(for: pane))
             }
             return AnyView(EmptyView())
-        case .split(let axis, let primary, let secondary):
-            if axis == .vertical {
-                return AnyView(HSplitView {
+        case .split(let axis, let ratio, let primary, let secondary):
+            return AnyView(
+                ProportionalSplitView(axis: axis, ratio: ratio) {
                     layoutView(for: primary)
+                } secondary: {
                     layoutView(for: secondary)
-                })
-            } else {
-                return AnyView(VSplitView {
-                    layoutView(for: primary)
-                    layoutView(for: secondary)
-                })
-            }
+                }
+            )
         }
     }
 

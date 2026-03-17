@@ -557,3 +557,124 @@ Then('the vertical split shortcut should create a {string} root split', function
 Then('the final tmux split layout should include {string}', function (text) {
   assert.ok(this.windowSemantics.finalLayoutDescription.includes(text))
 })
+
+When('I headless-check CLI workspace sync', function () {
+  this.syncResult = this.runCliJson('headless-check-cli-workspace-sync')
+})
+
+Then('the initial workspace should have {int} session', function (count) {
+  assert.equal(this.syncResult.initialSessionCount, count)
+})
+
+Then('the workspace change notification should be received', function () {
+  assert.equal(this.syncResult.notificationReceived, true)
+})
+
+Then('the reloaded workspace should have {int} sessions named {string} and {string}', function (count, name1, name2) {
+  assert.equal(this.syncResult.reloadedSessionCount, count)
+  assert.ok(this.syncResult.reloadedSessionNames.includes(name1))
+  assert.ok(this.syncResult.reloadedSessionNames.includes(name2))
+})
+
+Then('after CLI deletes a session only {string} should remain', function (name) {
+  assert.equal(this.syncResult.afterDeleteSessionCount, 1)
+  assert.deepEqual(this.syncResult.afterDeleteSessionNames, [name])
+})
+
+Then('after CLI adds a pane the window should have {int} pane titled {string}', function (count, title) {
+  assert.equal(this.syncResult.paneCountAfterCLIAdd, count)
+  assert.ok(this.syncResult.paneTitlesAfterCLIAdd.includes(title))
+})
+
+When('I headless-check pane split and remove', function () {
+  this.splitRemoveResult = this.runCliJson('headless-check-pane-split-and-remove')
+})
+
+Then('the split should produce {int} panes', function (count) {
+  assert.equal(this.splitRemoveResult.paneCountAfterSplit, count)
+})
+
+Then('the split ratio should be {float}', function (ratio) {
+  assert.equal(this.splitRemoveResult.splitRatio, ratio)
+})
+
+Then('removing a pane should leave {int} pane', function (count) {
+  assert.equal(this.splitRemoveResult.paneCountAfterRemove, count)
+})
+
+Then('the layout after removal should be a single leaf', function () {
+  assert.equal(this.splitRemoveResult.isLeafAfterRemove, true)
+})
+
+When('I headless-check nested pane split', function () {
+  this.nestedSplitResult = this.runCliJson('headless-check-nested-pane-split')
+})
+
+Then('the nested split should produce {int} panes', function (count) {
+  assert.equal(this.nestedSplitResult.paneCount, count)
+})
+
+Then('the nested split root axis should be {string}', function (axis) {
+  assert.equal(this.nestedSplitResult.rootAxis, axis)
+})
+
+Then('the nested split child axis should be {string}', function (axis) {
+  assert.equal(this.nestedSplitResult.nestedAxis, axis)
+})
+
+Then('the nested split layout should include {string} and {string}', function (first, second) {
+  assert.ok(this.nestedSplitResult.layoutDescription.includes(first))
+  assert.ok(this.nestedSplitResult.layoutDescription.includes(second))
+})
+
+When('I headless-check pane layout stability', function () {
+  this.stabilityResult = this.runCliJson('headless-check-pane-layout-stability')
+})
+
+Then('all split ratios should be {float} with {int} panes', function (_ratio, _count) {
+  assert.equal(this.stabilityResult.allRatiosHalf4Panes, true)
+})
+
+Then('the {int}-pane layout should contain {int} levels of nesting', function (_panes, levels) {
+  // 3 levels = 3 split nodes = 3 occurrences of "0.5," in the description
+  const matches = this.stabilityResult.descAfter4Panes.match(/0\.5/g)
+  assert.equal(matches && matches.length, levels)
+})
+
+Then('deleting a secondary pane should leave {int} panes with all ratios {float}', function (count, _ratio) {
+  assert.equal(this.stabilityResult.paneCountAfterDeleteSecondary, count)
+  assert.equal(this.stabilityResult.allRatiosHalfAfterDeleteSecondary, true)
+})
+
+Then('deleting a primary pane should preserve the sibling in its place', function () {
+  assert.equal(this.stabilityResult.siblingPreservedAfterPrimaryDelete, true)
+  assert.equal(this.stabilityResult.paneCountAfterDeletePrimary, 2)
+})
+
+Then('deleting down to one pane should produce a single leaf', function () {
+  assert.equal(this.stabilityResult.lastPaneIsLeaf, true)
+})
+
+When('I headless-check tmux split key matching', function () {
+  this.splitKeyResult = this.runCliJson('headless-check-tmux-split-key-matching')
+})
+
+Then('the vertical split key should match {string}', function (_char) {
+  assert.equal(this.splitKeyResult.verticalKeyMatched, true)
+})
+
+Then('the horizontal split key should match the quote character', function () {
+  assert.equal(this.splitKeyResult.horizontalKeyMatched, true)
+})
+
+Then('the key-matched splits should produce {int} panes', function (count) {
+  assert.equal(this.splitKeyResult.paneCountAfterSplits, count)
+})
+
+Then('the nested split root ratio should be {float}', function (ratio) {
+  assert.equal(this.nestedSplitResult.rootRatio, ratio)
+})
+
+Then('the nested split child ratio should be {float}', function (ratio) {
+  assert.equal(this.nestedSplitResult.nestedRatio, ratio)
+})

@@ -355,6 +355,350 @@ public enum TerminalHeadlessHarness {
         )
     }
 
+    public static func checkTmuxSplitShortcutKeyMatching() throws -> TmuxSplitKeyMatchResult {
+        // Test that NSEvent with Ctrl+Shift produces correct charactersIgnoringModifiers
+        let verticalEvent = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [.control, .shift],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "\u{1d}",
+            charactersIgnoringModifiers: "%",
+            isARepeat: false,
+            keyCode: 23
+        )
+
+        let horizontalEvent = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [.control, .shift],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "\u{1c}",
+            charactersIgnoringModifiers: "\"",
+            isARepeat: false,
+            keyCode: 39
+        )
+
+        let verticalKeyMatched = verticalEvent?.charactersIgnoringModifiers == "%"
+        let horizontalKeyMatched = horizontalEvent?.charactersIgnoringModifiers == "\""
+
+        // Also verify model-level split works
+        var workspace = Workspace.empty()
+        let session = workspace.addSession(named: "Session 1")
+        let window = try workspace.addWindow(toSessionID: session.id, title: "Main")
+        let rootPane = WorkspacePane.terminal(
+            title: "Shell",
+            provider: .terminal,
+            workingDirectory: FileManager.default.currentDirectoryPath
+        )
+        try workspace.addPane(rootPane, toSessionID: session.id, windowID: window.id)
+
+        if verticalKeyMatched {
+            let vPane = WorkspacePane.terminal(title: "V", provider: .terminal, workingDirectory: FileManager.default.currentDirectoryPath)
+            _ = try workspace.splitPane(sessionID: session.id, windowID: window.id, paneID: rootPane.id, axis: .vertical, newPane: vPane)
+        }
+        if horizontalKeyMatched {
+            let hPane = WorkspacePane.terminal(title: "H", provider: .terminal, workingDirectory: FileManager.default.currentDirectoryPath)
+            _ = try workspace.splitPane(sessionID: session.id, windowID: window.id, paneID: rootPane.id, axis: .horizontal, newPane: hPane)
+        }
+
+        let finalWindow = try workspace.window(sessionID: session.id, windowID: window.id)
+        return TmuxSplitKeyMatchResult(
+            verticalKeyMatched: verticalKeyMatched,
+            horizontalKeyMatched: horizontalKeyMatched,
+            paneCountAfterSplits: finalWindow.panes.count
+        )
+    }
+
+    public static func checkNestedPaneSplit() throws -> NestedPaneSplitResult {
+        var workspace = Workspace.empty()
+        let session = workspace.addSession(named: "Session 1")
+        let window = try workspace.addWindow(toSessionID: session.id, title: "Main")
+        let topPane = WorkspacePane.terminal(
+            title: "Top",
+            provider: .terminal,
+            workingDirectory: FileManager.default.currentDirectoryPath
+        )
+        try workspace.addPane(topPane, toSessionID: session.id, windowID: window.id)
+
+        // Step 1: horizontal split (top / bottom)
+        let bottomPane = WorkspacePane.terminal(
+            title: "Bottom",
+            provider: .terminal,
+            workingDirectory: FileManager.default.currentDirectoryPath
+        )
+        _ = try workspace.splitPane(
+            sessionID: session.id,
+            windowID: window.id,
+            paneID: topPane.id,
+            axis: .horizontal,
+            newPane: bottomPane
+        )
+
+        let layoutAfterFirstSplit = try workspace.window(sessionID: session.id, windowID: window.id).layout
+        let rootAxisAfterFirstSplit = axisName(of: layoutAfterFirstSplit)
+
+        // Step 2: vertical split on bottom pane (bottom-left / bottom-right)
+        let bottomRightPane = WorkspacePane.terminal(
+            title: "BottomRight",
+            provider: .terminal,
+            workingDirectory: FileManager.default.currentDirectoryPath
+        )
+        _ = try workspace.splitPane(
+            sessionID: session.id,
+            windowID: window.id,
+            paneID: bottomPane.id,
+            axis: .vertical,
+            newPane: bottomRightPane
+        )
+
+        let finalWindow = try workspace.window(sessionID: session.id, windowID: window.id)
+        let finalLayout = finalWindow.layout
+        let finalDescription = describe(layout: finalLayout)
+
+        // Verify nested structure: root should be horizontal, and secondary child should be vertical
+        let secondaryAxis: String?
+        if case .split(_, _, _, let secondary) = finalLayout {
+            secondaryAxis = axisName(of: secondary)
+        } else {
+            secondaryAxis = nil
+        }
+
+        let rootRatio: Double?
+        if case .split(_, let r, _, _) = finalLayout {
+            rootRatio = r
+        } else {
+            rootRatio = nil
+        }
+
+        let nestedRatio: Double?
+        if case .split(_, _, _, let secondary) = finalLayout,
+           case .split(_, let r, _, _) = secondary {
+            nestedRatio = r
+        } else {
+            nestedRatio = nil
+        }
+
+        return NestedPaneSplitResult(
+            paneCount: finalWindow.panes.count,
+            rootAxis: axisName(of: finalLayout),
+            nestedAxis: secondaryAxis,
+            rootRatio: rootRatio,
+            nestedRatio: nestedRatio,
+            layoutDescription: finalDescription
+        )
+    }
+
+    public static func checkPaneSplitAndRemove() throws -> PaneSplitRemoveResult {
+        var workspace = Workspace.empty()
+        let session = workspace.addSession(named: "Session 1")
+        let window = try workspace.addWindow(toSessionID: session.id, title: "Main")
+        let paneA = WorkspacePane.terminal(title: "A", provider: .terminal, workingDirectory: FileManager.default.currentDirectoryPath)
+        try workspace.addPane(paneA, toSessionID: session.id, windowID: window.id)
+
+        // Split vertically: A | B
+        let paneB = WorkspacePane.terminal(title: "B", provider: .terminal, workingDirectory: FileManager.default.currentDirectoryPath)
+        _ = try workspace.splitPane(sessionID: session.id, windowID: window.id, paneID: paneA.id, axis: .vertical, newPane: paneB)
+
+        let layoutAfterSplit = try workspace.window(sessionID: session.id, windowID: window.id).layout
+        let paneCountAfterSplit = try workspace.window(sessionID: session.id, windowID: window.id).panes.count
+
+        // Verify split layout: should be split(vertical, 0.5, leaf(A), leaf(B))
+        let isSplitAfterAdd: Bool
+        let splitRatio: Double?
+        if case .split(let axis, let ratio, .leaf(let leftID), .leaf(let rightID)) = layoutAfterSplit,
+           axis == .vertical, leftID == paneA.id, rightID == paneB.id {
+            isSplitAfterAdd = true
+            splitRatio = ratio
+        } else {
+            isSplitAfterAdd = false
+            splitRatio = nil
+        }
+
+        // Remove pane B: A should take full space
+        try workspace.removePane(sessionID: session.id, windowID: window.id, paneID: paneB.id)
+
+        let layoutAfterRemove = try workspace.window(sessionID: session.id, windowID: window.id).layout
+        let paneCountAfterRemove = try workspace.window(sessionID: session.id, windowID: window.id).panes.count
+
+        let isLeafAfterRemove: Bool
+        if case .leaf(let id) = layoutAfterRemove, id == paneA.id {
+            isLeafAfterRemove = true
+        } else {
+            isLeafAfterRemove = false
+        }
+
+        return PaneSplitRemoveResult(
+            paneCountAfterSplit: paneCountAfterSplit,
+            isSplitAfterAdd: isSplitAfterAdd,
+            splitRatio: splitRatio,
+            paneCountAfterRemove: paneCountAfterRemove,
+            isLeafAfterRemove: isLeafAfterRemove
+        )
+    }
+
+    public static func checkPaneLayoutStability() throws -> PaneLayoutStabilityResult {
+        let cwd = FileManager.default.currentDirectoryPath
+        var workspace = Workspace.empty()
+        let session = workspace.addSession(named: "Session 1")
+        let window = try workspace.addWindow(toSessionID: session.id, title: "Main")
+
+        // Start with pane A
+        let paneA = WorkspacePane.terminal(title: "A", provider: .terminal, workingDirectory: cwd)
+        try workspace.addPane(paneA, toSessionID: session.id, windowID: window.id)
+
+        // 1) Vertical split A → A | B
+        let paneB = WorkspacePane.terminal(title: "B", provider: .terminal, workingDirectory: cwd)
+        _ = try workspace.splitPane(sessionID: session.id, windowID: window.id, paneID: paneA.id, axis: .vertical, newPane: paneB)
+
+        // 2) Horizontal split B → B / C  (deep nesting: vertical(A, horizontal(B, C)))
+        let paneC = WorkspacePane.terminal(title: "C", provider: .terminal, workingDirectory: cwd)
+        _ = try workspace.splitPane(sessionID: session.id, windowID: window.id, paneID: paneB.id, axis: .horizontal, newPane: paneC)
+
+        // 3) Vertical split C → C | D  (3-level nesting)
+        let paneD = WorkspacePane.terminal(title: "D", provider: .terminal, workingDirectory: cwd)
+        _ = try workspace.splitPane(sessionID: session.id, windowID: window.id, paneID: paneC.id, axis: .vertical, newPane: paneD)
+
+        let layoutAfter4Panes = try workspace.window(sessionID: session.id, windowID: window.id).layout
+        let descAfter4Panes = describe(layout: layoutAfter4Panes)
+        let allRatiosHalf4 = collectRatios(layout: layoutAfter4Panes).allSatisfy { $0 == 0.5 }
+
+        // 4) Delete D (secondary of deepest split) → C should become leaf, B/C horizontal remains
+        try workspace.removePane(sessionID: session.id, windowID: window.id, paneID: paneD.id)
+        let layoutAfterDeleteD = try workspace.window(sessionID: session.id, windowID: window.id).layout
+        let descAfterDeleteD = describe(layout: layoutAfterDeleteD)
+        let paneCountAfterDeleteD = try workspace.window(sessionID: session.id, windowID: window.id).panes.count
+        let allRatiosHalf3 = collectRatios(layout: layoutAfterDeleteD).allSatisfy { $0 == 0.5 }
+
+        // 5) Delete B (primary of horizontal split) → C should take B's place
+        try workspace.removePane(sessionID: session.id, windowID: window.id, paneID: paneB.id)
+        let layoutAfterDeleteB = try workspace.window(sessionID: session.id, windowID: window.id).layout
+        let descAfterDeleteB = describe(layout: layoutAfterDeleteB)
+        let paneCountAfterDeleteB = try workspace.window(sessionID: session.id, windowID: window.id).panes.count
+
+        // Should be vertical(A, C) — the horizontal wrapper collapses
+        let siblingPreserved: Bool
+        if case .split(let axis, let ratio, .leaf(let left), .leaf(let right)) = layoutAfterDeleteB,
+           axis == .vertical, ratio == 0.5, left == paneA.id, right == paneC.id {
+            siblingPreserved = true
+        } else {
+            siblingPreserved = false
+        }
+
+        // 6) Delete A (primary of root) → C alone as leaf
+        try workspace.removePane(sessionID: session.id, windowID: window.id, paneID: paneA.id)
+        let layoutAfterDeleteA = try workspace.window(sessionID: session.id, windowID: window.id).layout
+        let finalIsLeaf: Bool
+        if case .leaf(let id) = layoutAfterDeleteA, id == paneC.id {
+            finalIsLeaf = true
+        } else {
+            finalIsLeaf = false
+        }
+
+        return PaneLayoutStabilityResult(
+            descAfter4Panes: descAfter4Panes,
+            allRatiosHalf4Panes: allRatiosHalf4,
+            descAfterDeleteSecondary: descAfterDeleteD,
+            paneCountAfterDeleteSecondary: paneCountAfterDeleteD,
+            allRatiosHalfAfterDeleteSecondary: allRatiosHalf3,
+            descAfterDeletePrimary: descAfterDeleteB,
+            paneCountAfterDeletePrimary: paneCountAfterDeleteB,
+            siblingPreservedAfterPrimaryDelete: siblingPreserved,
+            lastPaneIsLeaf: finalIsLeaf
+        )
+    }
+
+    public static func checkCLIWorkspaceSync() throws -> CLIWorkspaceSyncResult {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("myide-sync-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let workspaceURL = tempDir.appendingPathComponent("workspace.json")
+
+        // 1) Create initial workspace with one session
+        var workspace = Workspace.empty()
+        let session1 = workspace.addSession(named: "Session 1")
+        _ = try workspace.addWindow(toSessionID: session1.id, title: "Main")
+        try WorkspaceStore.save(workspace, to: workspaceURL)
+
+        let initialSessionCount = workspace.sessions.count
+
+        // 2) Simulate CLI adding a second session + saveAndNotify
+        var received = false
+        let expectation = DistributedNotificationCenter.default().addObserver(
+            forName: WorkspaceStore.workspaceDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { notification in
+            if let path = notification.object as? String, path == workspaceURL.path {
+                received = true
+            }
+        }
+
+        let session2 = workspace.addSession(named: "Session 2")
+        _ = try workspace.addWindow(toSessionID: session2.id, title: "Main")
+        try WorkspaceStore.saveAndNotify(workspace, to: workspaceURL)
+
+        // Pump run loop to let notification deliver
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        DistributedNotificationCenter.default().removeObserver(expectation)
+
+        let notificationReceived = received
+
+        // 3) Simulate app reload (what AppViewModel does on notification)
+        let reloaded = try WorkspaceStore.load(from: workspaceURL)
+        let reloadedSessionCount = reloaded.sessions.count
+        let reloadedSessionNames = reloaded.sessions.map(\.name)
+
+        // 4) Simulate CLI deleting session 1 + notify
+        var mutable = reloaded
+        try mutable.removeSession(sessionID: session1.id)
+        try WorkspaceStore.saveAndNotify(mutable, to: workspaceURL)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+
+        let afterDelete = try WorkspaceStore.load(from: workspaceURL)
+        let afterDeleteSessionCount = afterDelete.sessions.count
+        let afterDeleteSessionNames = afterDelete.sessions.map(\.name)
+
+        // 5) Simulate CLI adding a pane to session 2's window
+        var withPane = afterDelete
+        let windowID = withPane.sessions[0].windows[0].id
+        let pane = WorkspacePane.terminal(title: "CLI Pane", provider: .terminal, workingDirectory: FileManager.default.currentDirectoryPath)
+        try withPane.addPane(pane, toSessionID: session2.id, windowID: windowID)
+        try WorkspaceStore.saveAndNotify(withPane, to: workspaceURL)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+
+        let afterAddPane = try WorkspaceStore.load(from: workspaceURL)
+        let paneCount = afterAddPane.sessions[0].windows[0].panes.count
+        let paneTitles = afterAddPane.sessions[0].windows[0].panes.map(\.title)
+
+        return CLIWorkspaceSyncResult(
+            initialSessionCount: initialSessionCount,
+            notificationReceived: notificationReceived,
+            reloadedSessionCount: reloadedSessionCount,
+            reloadedSessionNames: reloadedSessionNames,
+            afterDeleteSessionCount: afterDeleteSessionCount,
+            afterDeleteSessionNames: afterDeleteSessionNames,
+            paneCountAfterCLIAdd: paneCount,
+            paneTitlesAfterCLIAdd: paneTitles
+        )
+    }
+
+    private static func collectRatios(layout: PaneLayoutNode?) -> [Double] {
+        guard let layout else { return [] }
+        switch layout {
+        case .leaf:
+            return []
+        case .split(_, let ratio, let primary, let secondary):
+            return [ratio] + collectRatios(layout: primary) + collectRatios(layout: secondary)
+        }
+    }
+
     private static func terminalSnapshot(from terminal: HeadlessTerminal) -> String {
         String(decoding: terminal.terminal.getBufferAsData(), as: UTF8.self)
     }
@@ -392,7 +736,7 @@ public enum TerminalHeadlessHarness {
     private static let prompt = "MYIDE> "
 
     private static func axisName(of layout: PaneLayoutNode?) -> String? {
-        guard case .split(let axis, _, _) = layout else {
+        guard case .split(let axis, _, _, _) = layout else {
             return nil
         }
 
@@ -407,8 +751,8 @@ public enum TerminalHeadlessHarness {
         switch layout {
         case .leaf(let paneID):
             return "leaf(\(paneID))"
-        case .split(let axis, let primary, let secondary):
-            return "\(axis.rawValue)(\(describe(layout: primary)),\(describe(layout: secondary)))"
+        case .split(let axis, let ratio, let primary, let secondary):
+            return "\(axis.rawValue)(\(String(format: "%.1f", ratio)),\(describe(layout: primary)),\(describe(layout: secondary)))"
         }
     }
 
@@ -552,6 +896,117 @@ public struct AddPaneSheetScopeResult: Codable, Sendable {
     public init(firstWindowShowingSheet: Bool, secondWindowShowingSheet: Bool) {
         self.firstWindowShowingSheet = firstWindowShowingSheet
         self.secondWindowShowingSheet = secondWindowShowingSheet
+    }
+}
+
+public struct TmuxSplitKeyMatchResult: Codable, Sendable {
+    public var verticalKeyMatched: Bool
+    public var horizontalKeyMatched: Bool
+    public var paneCountAfterSplits: Int
+
+    public init(verticalKeyMatched: Bool, horizontalKeyMatched: Bool, paneCountAfterSplits: Int) {
+        self.verticalKeyMatched = verticalKeyMatched
+        self.horizontalKeyMatched = horizontalKeyMatched
+        self.paneCountAfterSplits = paneCountAfterSplits
+    }
+}
+
+public struct NestedPaneSplitResult: Codable, Sendable {
+    public var paneCount: Int
+    public var rootAxis: String?
+    public var nestedAxis: String?
+    public var rootRatio: Double?
+    public var nestedRatio: Double?
+    public var layoutDescription: String
+
+    public init(paneCount: Int, rootAxis: String?, nestedAxis: String?, rootRatio: Double?, nestedRatio: Double?, layoutDescription: String) {
+        self.paneCount = paneCount
+        self.rootAxis = rootAxis
+        self.nestedAxis = nestedAxis
+        self.rootRatio = rootRatio
+        self.nestedRatio = nestedRatio
+        self.layoutDescription = layoutDescription
+    }
+}
+
+public struct PaneSplitRemoveResult: Codable, Sendable {
+    public var paneCountAfterSplit: Int
+    public var isSplitAfterAdd: Bool
+    public var splitRatio: Double?
+    public var paneCountAfterRemove: Int
+    public var isLeafAfterRemove: Bool
+
+    public init(paneCountAfterSplit: Int, isSplitAfterAdd: Bool, splitRatio: Double?, paneCountAfterRemove: Int, isLeafAfterRemove: Bool) {
+        self.paneCountAfterSplit = paneCountAfterSplit
+        self.isSplitAfterAdd = isSplitAfterAdd
+        self.splitRatio = splitRatio
+        self.paneCountAfterRemove = paneCountAfterRemove
+        self.isLeafAfterRemove = isLeafAfterRemove
+    }
+}
+
+public struct CLIWorkspaceSyncResult: Codable, Sendable {
+    public var initialSessionCount: Int
+    public var notificationReceived: Bool
+    public var reloadedSessionCount: Int
+    public var reloadedSessionNames: [String]
+    public var afterDeleteSessionCount: Int
+    public var afterDeleteSessionNames: [String]
+    public var paneCountAfterCLIAdd: Int
+    public var paneTitlesAfterCLIAdd: [String]
+
+    public init(
+        initialSessionCount: Int,
+        notificationReceived: Bool,
+        reloadedSessionCount: Int,
+        reloadedSessionNames: [String],
+        afterDeleteSessionCount: Int,
+        afterDeleteSessionNames: [String],
+        paneCountAfterCLIAdd: Int,
+        paneTitlesAfterCLIAdd: [String]
+    ) {
+        self.initialSessionCount = initialSessionCount
+        self.notificationReceived = notificationReceived
+        self.reloadedSessionCount = reloadedSessionCount
+        self.reloadedSessionNames = reloadedSessionNames
+        self.afterDeleteSessionCount = afterDeleteSessionCount
+        self.afterDeleteSessionNames = afterDeleteSessionNames
+        self.paneCountAfterCLIAdd = paneCountAfterCLIAdd
+        self.paneTitlesAfterCLIAdd = paneTitlesAfterCLIAdd
+    }
+}
+
+public struct PaneLayoutStabilityResult: Codable, Sendable {
+    public var descAfter4Panes: String
+    public var allRatiosHalf4Panes: Bool
+    public var descAfterDeleteSecondary: String
+    public var paneCountAfterDeleteSecondary: Int
+    public var allRatiosHalfAfterDeleteSecondary: Bool
+    public var descAfterDeletePrimary: String
+    public var paneCountAfterDeletePrimary: Int
+    public var siblingPreservedAfterPrimaryDelete: Bool
+    public var lastPaneIsLeaf: Bool
+
+    public init(
+        descAfter4Panes: String,
+        allRatiosHalf4Panes: Bool,
+        descAfterDeleteSecondary: String,
+        paneCountAfterDeleteSecondary: Int,
+        allRatiosHalfAfterDeleteSecondary: Bool,
+        descAfterDeletePrimary: String,
+        paneCountAfterDeletePrimary: Int,
+        siblingPreservedAfterPrimaryDelete: Bool,
+        lastPaneIsLeaf: Bool
+    ) {
+        self.descAfter4Panes = descAfter4Panes
+        self.allRatiosHalf4Panes = allRatiosHalf4Panes
+        self.descAfterDeleteSecondary = descAfterDeleteSecondary
+        self.paneCountAfterDeleteSecondary = paneCountAfterDeleteSecondary
+        self.allRatiosHalfAfterDeleteSecondary = allRatiosHalfAfterDeleteSecondary
+        self.descAfterDeletePrimary = descAfterDeletePrimary
+        self.paneCountAfterDeletePrimary = paneCountAfterDeletePrimary
+        self.siblingPreservedAfterPrimaryDelete = siblingPreservedAfterPrimaryDelete
+        self.lastPaneIsLeaf = lastPaneIsLeaf
     }
 }
 

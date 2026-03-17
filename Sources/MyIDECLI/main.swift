@@ -51,7 +51,7 @@ private struct CLI {
             var workspace = try WorkspaceStore.load(from: workspaceURL)
             let name = try requiredOption("name", in: options)
             let session = workspace.addSession(named: name)
-            try WorkspaceStore.save(workspace, to: workspaceURL)
+            try WorkspaceStore.saveAndNotify(workspace, to: workspaceURL)
             try printJSON(session)
         case "update-session":
             let workspaceURL = try workspaceURL(from: options)
@@ -61,7 +61,7 @@ private struct CLI {
             try workspace.updateSession(sessionID: sessionID) { session in
                 session.name = name
             }
-            try WorkspaceStore.save(workspace, to: workspaceURL)
+            try WorkspaceStore.saveAndNotify(workspace, to: workspaceURL)
             guard let session = workspace.session(withID: sessionID) else {
                 throw WorkspaceError.sessionNotFound(sessionID)
             }
@@ -71,7 +71,7 @@ private struct CLI {
             var workspace = try WorkspaceStore.load(from: workspaceURL)
             let sessionID = try requiredOption("session-id", in: options)
             try workspace.removeSession(sessionID: sessionID)
-            try WorkspaceStore.save(workspace, to: workspaceURL)
+            try WorkspaceStore.saveAndNotify(workspace, to: workspaceURL)
             try printJSON(workspace)
         case "add-window":
             let workspaceURL = try workspaceURL(from: options)
@@ -79,7 +79,7 @@ private struct CLI {
             let sessionID = try requiredOption("session-id", in: options)
             let title = try requiredOption("title", in: options)
             let window = try workspace.addWindow(toSessionID: sessionID, title: title)
-            try WorkspaceStore.save(workspace, to: workspaceURL)
+            try WorkspaceStore.saveAndNotify(workspace, to: workspaceURL)
             try printJSON(window)
         case "show-window":
             let workspaceURL = try workspaceURL(from: options)
@@ -96,7 +96,7 @@ private struct CLI {
             try workspace.updateWindow(sessionID: sessionID, windowID: windowID) { window in
                 window.title = title
             }
-            try WorkspaceStore.save(workspace, to: workspaceURL)
+            try WorkspaceStore.saveAndNotify(workspace, to: workspaceURL)
             try printJSON(try workspace.window(sessionID: sessionID, windowID: windowID))
         case "delete-window":
             let workspaceURL = try workspaceURL(from: options)
@@ -104,7 +104,7 @@ private struct CLI {
             let sessionID = try requiredOption("session-id", in: options)
             let windowID = try requiredOption("window-id", in: options)
             try workspace.removeWindow(sessionID: sessionID, windowID: windowID)
-            try WorkspaceStore.save(workspace, to: workspaceURL)
+            try WorkspaceStore.saveAndNotify(workspace, to: workspaceURL)
             try printJSON(try sessionPayload(workspace: workspace, sessionID: sessionID))
         case "add-pane":
             let workspaceURL = try workspaceURL(from: options)
@@ -113,7 +113,7 @@ private struct CLI {
             let windowID = try requiredOption("window-id", in: options)
             let pane = try makePane(from: options)
             try workspace.addPane(pane, toSessionID: sessionID, windowID: windowID)
-            try WorkspaceStore.save(workspace, to: workspaceURL)
+            try WorkspaceStore.saveAndNotify(workspace, to: workspaceURL)
             try printJSON(pane)
         case "show-pane":
             let workspaceURL = try workspaceURL(from: options)
@@ -131,7 +131,7 @@ private struct CLI {
             try workspace.updatePane(sessionID: sessionID, windowID: windowID, paneID: paneID) { pane in
                 try applyPaneUpdates(to: &pane, options: options)
             }
-            try WorkspaceStore.save(workspace, to: workspaceURL)
+            try WorkspaceStore.saveAndNotify(workspace, to: workspaceURL)
             try printJSON(try workspace.pane(sessionID: sessionID, windowID: windowID, paneID: paneID))
         case "delete-pane":
             let workspaceURL = try workspaceURL(from: options)
@@ -140,7 +140,7 @@ private struct CLI {
             let windowID = try requiredOption("window-id", in: options)
             let paneID = try requiredOption("pane-id", in: options)
             try workspace.removePane(sessionID: sessionID, windowID: windowID, paneID: paneID)
-            try WorkspaceStore.save(workspace, to: workspaceURL)
+            try WorkspaceStore.saveAndNotify(workspace, to: workspaceURL)
             try printJSON(try workspace.window(sessionID: sessionID, windowID: windowID))
         case "run-terminal":
             let workspaceURL = try workspaceURL(from: options)
@@ -161,7 +161,7 @@ private struct CLI {
                 pane.terminal?.lastOutput = result.output
                 pane.terminal?.lastExitCode = result.exitCode
             }
-            try WorkspaceStore.save(workspace, to: workspaceURL)
+            try WorkspaceStore.saveAndNotify(workspace, to: workspaceURL)
             try printJSON(try workspace.pane(sessionID: sessionID, windowID: windowID, paneID: paneID))
         case "refresh-diff":
             let workspaceURL = try workspaceURL(from: options)
@@ -179,7 +179,7 @@ private struct CLI {
             try workspace.updatePane(sessionID: sessionID, windowID: windowID, paneID: paneID) { pane in
                 pane.diff?.lastDiff = output
             }
-            try WorkspaceStore.save(workspace, to: workspaceURL)
+            try WorkspaceStore.saveAndNotify(workspace, to: workspaceURL)
             try printJSON(try workspace.pane(sessionID: sessionID, windowID: windowID, paneID: paneID))
         case "render-markdown":
             let file = try requiredOption("file", in: options)
@@ -237,6 +237,21 @@ private struct CLI {
             try printJSON(result)
         case "headless-check-tmux-split-shortcuts":
             let result = try TerminalHeadlessHarness.checkTmuxSplitShortcuts()
+            try printJSON(result)
+        case "headless-check-cli-workspace-sync":
+            let result = try TerminalHeadlessHarness.checkCLIWorkspaceSync()
+            try printJSON(result)
+        case "headless-check-pane-split-and-remove":
+            let result = try TerminalHeadlessHarness.checkPaneSplitAndRemove()
+            try printJSON(result)
+        case "headless-check-pane-layout-stability":
+            let result = try TerminalHeadlessHarness.checkPaneLayoutStability()
+            try printJSON(result)
+        case "headless-check-nested-pane-split":
+            let result = try TerminalHeadlessHarness.checkNestedPaneSplit()
+            try printJSON(result)
+        case "headless-check-tmux-split-key-matching":
+            let result = try TerminalHeadlessHarness.checkTmuxSplitShortcutKeyMatching()
             try printJSON(result)
         case "debug-terminal-ancestry":
             let appURL = URL(fileURLWithPath: CommandLine.arguments[0])

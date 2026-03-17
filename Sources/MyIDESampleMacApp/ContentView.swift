@@ -200,7 +200,7 @@ struct ContentView: View {
         }
 
         let flags = event.modifierFlags.intersection([.control, .shift, .command, .option])
-        guard flags == [.control, .shift], let characters = event.characters else {
+        guard flags == [.control, .shift], let characters = event.charactersIgnoringModifiers else {
             return false
         }
 

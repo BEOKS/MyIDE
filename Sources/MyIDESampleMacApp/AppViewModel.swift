@@ -7,6 +7,7 @@ final class AppViewModel: ObservableObject {
     @Published var errorMessage: String?
 
     let persistenceURL: URL
+    private var changeObserver: NSObjectProtocol?
 
     init() {
         persistenceURL = Self.defaultWorkspaceURL()
@@ -18,6 +19,38 @@ final class AppViewModel: ObservableObject {
             errorMessage = error.localizedDescription
         }
 
+        startWatchingExternalChanges()
+    }
+
+    deinit {
+        if let changeObserver {
+            DistributedNotificationCenter.default().removeObserver(changeObserver)
+        }
+    }
+
+    private func startWatchingExternalChanges() {
+        changeObserver = DistributedNotificationCenter.default().addObserver(
+            forName: WorkspaceStore.workspaceDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            MainActor.assumeIsolated { [weak self] in
+                self?.reloadFromDisk(notification: notification)
+            }
+        }
+    }
+
+    private func reloadFromDisk(notification: Notification) {
+        guard let senderPath = notification.object as? String,
+              senderPath == persistenceURL.path else {
+            return
+        }
+
+        do {
+            workspace = try WorkspaceStore.load(from: persistenceURL)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     func session(id: String) -> WorkspaceSession? {
