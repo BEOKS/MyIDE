@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 5.10
 
 import PackageDescription
 
@@ -27,6 +27,9 @@ let package = Package(
     targets: [
         .target(
             name: "MyIDECore",
+            dependencies: [
+                .product(name: "SwiftTerm", package: "SwiftTerm")
+            ],
             path: "Sources/MyIDECore"
         ),
         .executableTarget(

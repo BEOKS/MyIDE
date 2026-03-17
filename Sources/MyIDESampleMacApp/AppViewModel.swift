@@ -118,6 +118,17 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func updateDiffPanePaths(paneID: String, leftPath: String, rightPath: String) {
+        mutatePane(paneID: paneID) { pane in
+            guard var diff = pane.diff else {
+                throw WorkspaceError.invalidPane("Diff pane is not configured")
+            }
+            diff.leftPath = leftPath
+            diff.rightPath = rightPath
+            pane.diff = diff
+        }
+    }
+
     func updatePreviewPanePath(paneID: String, filePath: String) {
         mutatePane(paneID: paneID) { pane in
             guard var preview = pane.preview else {

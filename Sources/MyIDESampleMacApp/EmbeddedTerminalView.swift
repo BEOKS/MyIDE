@@ -2,20 +2,57 @@ import AppKit
 import SwiftTerm
 import MyIDECore
 
-final class EmbeddedTerminalView: LocalProcessTerminalView, LocalProcessTerminalViewDelegate {
+private final class EmbeddedTerminalProcessDelegate: LocalProcessTerminalViewDelegate {
+    private let onProcessTerminated: (Int32?) -> Void
+
+    init(onProcessTerminated: @escaping (Int32?) -> Void) {
+        self.onProcessTerminated = onProcessTerminated
+    }
+
+    func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {
+        _ = source
+        _ = newCols
+        _ = newRows
+    }
+
+    func setTerminalTitle(source: LocalProcessTerminalView, title: String) {
+        _ = source
+        _ = title
+    }
+
+    func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
+        _ = source
+        _ = directory
+    }
+
+    func processTerminated(source: TerminalView, exitCode: Int32?) {
+        _ = source
+        onProcessTerminated(exitCode)
+    }
+}
+
+final class EmbeddedTerminalView: LocalProcessTerminalView {
     let paneID: String
     private let configuration: TerminalPaneConfiguration
+    private let onProcessTerminated: () -> Void
+    private lazy var terminalProcessDelegate = EmbeddedTerminalProcessDelegate { [weak self] exitCode in
+        self?.handleProcessTermination(exitCode: exitCode)
+    }
     private var hasStartedProcess = false
+    private var hasHandledProcessTermination = false
 
-    init(paneID: String, configuration: TerminalPaneConfiguration) {
+    init(paneID: String, configuration: TerminalPaneConfiguration, onProcessTerminated: @escaping () -> Void) {
         self.paneID = paneID
         self.configuration = configuration
+        self.onProcessTerminated = onProcessTerminated
         super.init(frame: .zero)
         setupAppearance()
-        processDelegate = self
+        processDelegate = terminalProcessDelegate
         setAccessibilityElement(true)
         setAccessibilityIdentifier("embedded-terminal-\(paneID)")
         setAccessibilityLabel("Embedded Terminal \(paneID)")
+        let clickGesture = NSClickGestureRecognizer(target: self, action: #selector(focusWindowForInteraction))
+        addGestureRecognizer(clickGesture)
     }
 
     @available(*, unavailable)
@@ -40,34 +77,27 @@ final class EmbeddedTerminalView: LocalProcessTerminalView, LocalProcessTerminal
         startIfNeeded()
     }
 
-    override func mouseDown(with event: NSEvent) {
+    @objc
+    private func focusWindowForInteraction() {
         NSApplication.shared.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
         window?.makeFirstResponder(self)
-        super.mouseDown(with: event)
     }
 
     func terminalSnapshot() -> String {
         String(decoding: getTerminal().getBufferAsData(), as: UTF8.self)
     }
 
-    func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {
-        _ = newCols
-        _ = newRows
-    }
-
-    func setTerminalTitle(source: LocalProcessTerminalView, title: String) {
-        _ = title
-    }
-
-    func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
-        _ = source
-        _ = directory
-    }
-
-    func processTerminated(source: TerminalView, exitCode: Int32?) {
-        _ = source
+    private func handleProcessTermination(exitCode: Int32?) {
         _ = exitCode
+        guard !hasHandledProcessTermination else {
+            return
+        }
+
+        hasHandledProcessTermination = true
+        Task { @MainActor [onProcessTerminated] in
+            onProcessTerminated()
+        }
     }
 
     private func setupAppearance() {

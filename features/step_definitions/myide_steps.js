@@ -3,6 +3,25 @@ const { Given, When, Then } = require('@cucumber/cucumber')
 const { writeFileSync } = require('node:fs')
 const { join } = require('node:path')
 
+function resolveToken(value) {
+  if (value === '$ROOT') {
+    return process.cwd()
+  }
+
+  return value
+}
+
+function resolveFixturePath(world, value) {
+  return join(world.tempDir, value)
+}
+
+function normalizeTerminalCommand(command) {
+  return command
+    .replace(/\u001b/g, '\\033')
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n')
+}
+
 Given('a fresh workspace', function () {
   this.runCli('init', '--workspace', this.workspacePath)
 })
@@ -137,22 +156,52 @@ When('I check terminal click-to-type with text {string}', function (text) {
   )
 })
 
-When('I UI-check terminal click-to-type with text {string}', function (text) {
+When('I headless-check terminal click-to-type with text {string}', function (text) {
   this.terminalInteraction = this.runCliJson(
-    'ui-check-terminal-input',
+    'headless-check-terminal-input',
     '--typed-text', text
   )
 })
 
-When('I UI-check terminal pane layout', function () {
-  this.terminalLayout = this.runCliJson('ui-check-terminal-layout')
+When('I headless-check terminal pane layout', function () {
+  this.terminalLayout = this.runCliJson('headless-check-terminal-layout')
 })
 
-When('I UI-run terminal command {string} expecting output {string}', function (command, expectedOutput) {
+When('I headless-check pane chrome', function () {
+  this.terminalInteraction = this.runCliJson('headless-check-pane-chrome')
+})
+
+When('I headless-run terminal command {string} expecting output {string}', function (command, expectedOutput) {
   this.terminalInteraction = this.runCliJson(
-    'ui-run-terminal-command',
-    '--command', command,
-    '--expected-output', expectedOutput
+    'headless-run-terminal-command',
+    '--command', normalizeTerminalCommand(command),
+    '--expected-output', resolveToken(expectedOutput)
+  )
+})
+
+When('I headless-run the ANSI cursor movement sample', function () {
+  this.terminalInteraction = this.runCliJson(
+    'headless-run-terminal-command',
+    '--command', "printf '123'; printf '\\033[2D'; printf 'X\\n'",
+    '--expected-output', '1X3'
+  )
+})
+
+When('I headless-send ctrl+d to the terminal pane', function () {
+  this.terminalInteraction = this.runCliJson('headless-send-terminal-eot')
+})
+
+When('I headless-select preview file {string} through the file picker', function (fileName) {
+  this.terminalInteraction = this.runCliJson(
+    'headless-select-preview-file',
+    '--selected-file', resolveFixturePath(this, fileName)
+  )
+})
+
+When('I headless-select diff file {string} through the file picker', function (fileName) {
+  this.terminalInteraction = this.runCliJson(
+    'headless-select-diff-file',
+    '--selected-file', resolveFixturePath(this, fileName)
   )
 })
 
@@ -216,11 +265,13 @@ Then('terminal transcript should include {string}', function (text) {
 })
 
 Then('terminal snapshot should include {string}', function (text) {
+  text = resolveToken(text)
   const snapshot = this.terminalInteraction.editorValue ?? this.terminalInteraction.typedText ?? ''
   assert.ok(snapshot.includes(text), `Expected terminal snapshot to include "${text}" but got:\n${snapshot}`)
 })
 
 Then('terminal surface should receive typing {string}', function (text) {
+  text = resolveToken(text)
   const snapshot = this.terminalInteraction.editorValue ?? ''
   assert.ok(snapshot.includes(text), `Expected terminal surface to receive typing "${text}" but got:\n${snapshot}`)
 })
@@ -239,4 +290,24 @@ Then('terminal pane width ratio should be greater than {float}', function (value
 
 Then('terminal pane height ratio should be greater than {float}', function (value) {
   assert.ok(this.terminalLayout.heightRatio > value, `Expected height ratio > ${value} but got ${this.terminalLayout.heightRatio}`)
+})
+
+Then('pane count should be {int}', function (count) {
+  assert.equal(this.terminalInteraction.paneCount, count)
+})
+
+Then('pane title should not be visible', function () {
+  assert.equal(this.terminalInteraction.titleVisible, false)
+})
+
+Then('pane close button should not be visible', function () {
+  assert.equal(this.terminalInteraction.closeButtonVisible, false)
+})
+
+Then('terminal pane should close', function () {
+  assert.equal(this.terminalInteraction.paneClosed, true)
+})
+
+Then('selected file path should equal {string}', function (fileName) {
+  assert.equal(this.terminalInteraction.selectedPath, resolveFixturePath(this, fileName))
 })

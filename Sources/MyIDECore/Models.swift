@@ -8,6 +8,21 @@ public enum PaneKind: String, Codable, CaseIterable {
     case imagePreview
 }
 
+public struct PaneChromeConfiguration: Codable, Sendable {
+    public var showsTitle: Bool
+    public var showsCloseButton: Bool
+
+    public init(showsTitle: Bool, showsCloseButton: Bool) {
+        self.showsTitle = showsTitle
+        self.showsCloseButton = showsCloseButton
+    }
+
+    public static let minimal = PaneChromeConfiguration(
+        showsTitle: false,
+        showsCloseButton: false
+    )
+}
+
 public enum TerminalProvider: String, Codable, CaseIterable {
     case terminal
     case ghostty

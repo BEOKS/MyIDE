@@ -24,6 +24,36 @@ public struct TerminalUILayoutResult: Codable, Sendable {
     }
 }
 
+public struct PaneChromeTestResult: Codable, Sendable {
+    public var paneCount: Int
+    public var titleVisible: Bool
+    public var closeButtonVisible: Bool
+
+    public init(paneCount: Int, titleVisible: Bool, closeButtonVisible: Bool) {
+        self.paneCount = paneCount
+        self.titleVisible = titleVisible
+        self.closeButtonVisible = closeButtonVisible
+    }
+}
+
+public struct TerminalPaneLifecycleResult: Codable, Sendable {
+    public var paneCount: Int
+    public var paneClosed: Bool
+
+    public init(paneCount: Int, paneClosed: Bool) {
+        self.paneCount = paneCount
+        self.paneClosed = paneClosed
+    }
+}
+
+public struct FilePickerTestResult: Codable, Sendable {
+    public var selectedPath: String
+
+    public init(selectedPath: String) {
+        self.selectedPath = selectedPath
+    }
+}
+
 public struct AccessibilityNodeSnapshot: Codable, Sendable {
     public var identifier: String?
     public var role: String?
@@ -227,6 +257,10 @@ public enum TerminalUIAutomation {
         app.activate(options: [.activateAllWindows])
         waitFor(seconds: 0.5)
 
+        let finder = NSWorkspace.shared.runningApplications.first(where: { $0.localizedName == "Finder" })
+        finder?.activate(options: [.activateAllWindows])
+        waitFor(seconds: 0.3)
+
         let appElement = AXUIElementCreateApplication(process.processIdentifier)
         guard let windowElement = waitForWindow(in: appElement) else {
             throw TerminalUITestError.appWindowNotFound
@@ -246,6 +280,135 @@ public enum TerminalUIAutomation {
         return TerminalUILayoutResult(
             widthRatio: editorFrame.width / surfaceFrame.width,
             heightRatio: editorFrame.height / surfaceFrame.height
+        )
+    }
+
+    public static func runPaneChromeTest(appExecutableURL: URL, expectedPaneTitle: String) throws -> PaneChromeTestResult {
+        guard AXIsProcessTrusted() else {
+            throw TerminalUITestError.accessibilityUnavailable
+        }
+
+        terminateExistingAppInstances()
+        let workspaceURL = temporaryWorkspaceURL()
+        let automationDirectory = temporaryAutomationDirectory()
+        defer {
+            cleanupTemporaryWorkspace(at: workspaceURL)
+            cleanupTemporaryDirectory(at: automationDirectory)
+        }
+
+        let process = Process()
+        process.executableURL = appExecutableURL
+        process.environment = mergedEnvironment(with: workspaceURL, automationDirectory: automationDirectory)
+        try process.run()
+        defer {
+            if process.isRunning {
+                process.terminate()
+                process.waitUntilExit()
+            }
+        }
+
+        guard let app = waitForRunningApplication(pid: process.processIdentifier) else {
+            throw TerminalUITestError.appLaunchFailed
+        }
+
+        app.activate(options: [.activateAllWindows])
+        waitFor(seconds: 0.5)
+
+        let appElement = AXUIElementCreateApplication(process.processIdentifier)
+        guard let windowElement = waitForWindow(in: appElement) else {
+            throw TerminalUITestError.appWindowNotFound
+        }
+
+        guard let paneContainer = waitForElement(identifier: "pane-container-terminal", in: windowElement) else {
+            throw TerminalUITestError.surfaceNotFound
+        }
+
+        return PaneChromeTestResult(
+            paneCount: countElements(identifierPrefix: "pane-container-", in: windowElement),
+            titleVisible: containsText(expectedPaneTitle, in: paneContainer),
+            closeButtonVisible: containsRole(kAXButtonRole as String, in: paneContainer)
+        )
+    }
+
+    public static func runTerminalEndOfTransmissionTest(appExecutableURL: URL) throws -> TerminalPaneLifecycleResult {
+        guard AXIsProcessTrusted() else {
+            throw TerminalUITestError.accessibilityUnavailable
+        }
+
+        terminateExistingAppInstances()
+        let workspaceURL = temporaryWorkspaceURL()
+        let automationDirectory = temporaryAutomationDirectory()
+        defer {
+            cleanupTemporaryWorkspace(at: workspaceURL)
+            cleanupTemporaryDirectory(at: automationDirectory)
+        }
+
+        let process = Process()
+        process.executableURL = appExecutableURL
+        process.environment = mergedEnvironment(with: workspaceURL, automationDirectory: automationDirectory)
+        try process.run()
+        defer {
+            if process.isRunning {
+                process.terminate()
+                process.waitUntilExit()
+            }
+        }
+
+        guard let app = waitForRunningApplication(pid: process.processIdentifier) else {
+            throw TerminalUITestError.appLaunchFailed
+        }
+
+        app.activate(options: [.activateAllWindows])
+        waitFor(seconds: 0.5)
+
+        let appElement = AXUIElementCreateApplication(process.processIdentifier)
+        guard let windowElement = waitForWindow(in: appElement) else {
+            throw TerminalUITestError.appWindowNotFound
+        }
+
+        guard let surfaceElement = waitForTerminalSurface(in: windowElement) else {
+            throw TerminalUITestError.surfaceNotFound
+        }
+
+        let frame = try frame(of: surfaceElement)
+        click(at: CGPoint(x: frame.midX, y: frame.midY))
+        waitFor(seconds: 0.3)
+
+        _ = try? requestTerminalSnapshot(in: automationDirectory)
+        sendShortcut(keyCode: 2, flags: .maskControl)
+
+        let paneCount = waitUntil(timeout: 10, pollInterval: 0.2) {
+            let count = countElements(identifierPrefix: "pane-container-", in: windowElement)
+            return count == 0 ? count : nil
+        } ?? countElements(identifierPrefix: "pane-container-", in: windowElement)
+
+        return TerminalPaneLifecycleResult(
+            paneCount: paneCount,
+            paneClosed: paneCount == 0
+        )
+    }
+
+    public static func runPreviewFilePickerTest(appExecutableURL: URL, selectedFilePath: String) throws -> FilePickerTestResult {
+        let pane = WorkspacePane.markdownPreview(title: "Preview", filePath: "")
+        let workspace = workspaceForSinglePane(pane)
+        return try runFilePickerTest(
+            appExecutableURL: appExecutableURL,
+            workspace: workspace,
+            selectedFilePath: selectedFilePath,
+            buttonIdentifier: "preview-file-browse-\(pane.id)",
+            fieldIdentifier: "preview-file-path-\(pane.id)"
+        )
+    }
+
+    public static func runDiffFilePickerTest(appExecutableURL: URL, selectedFilePath: String) throws -> FilePickerTestResult {
+        let pane = WorkspacePane.diff(title: "Diff", leftPath: "", rightPath: "")
+        let workspace = workspaceForSinglePane(pane)
+        return try runFilePickerTest(
+            appExecutableURL: appExecutableURL,
+            workspace: workspace,
+            selectedFilePath: selectedFilePath,
+            buttonIdentifier: "diff-left-browse-\(pane.id)",
+            fieldIdentifier: "diff-left-path-\(pane.id)"
         )
     }
 
@@ -332,6 +495,18 @@ public enum TerminalUIAutomation {
         return environment
     }
 
+    private static func mergedEnvironment(
+        with workspaceURL: URL,
+        automationDirectory: URL,
+        extra: [String: String]
+    ) -> [String: String] {
+        var environment = mergedEnvironment(with: workspaceURL, automationDirectory: automationDirectory)
+        for (key, value) in extra {
+            environment[key] = value
+        }
+        return environment
+    }
+
     private static func waitForWindow(in appElement: AXUIElement) -> AXUIElement? {
         waitUntil(timeout: 10) {
             guard let windows = copyAttribute(appElement, attribute: kAXWindowsAttribute) as? [AXUIElement] else {
@@ -343,7 +518,11 @@ public enum TerminalUIAutomation {
     }
 
     private static func waitForTerminalSurface(in root: AXUIElement) -> AXUIElement? {
-        waitForElement(identifier: "terminal-pane-surface", in: root)
+        if let taggedSurface = waitForElement(identifier: "terminal-pane-surface", in: root) {
+            return taggedSurface
+        }
+
+        return waitForElement(identifier: "embedded-terminal-", in: root, partialMatch: true)
     }
 
     private static func waitForElement(identifier: String, in root: AXUIElement, partialMatch: Bool = false) -> AXUIElement? {
@@ -358,6 +537,15 @@ public enum TerminalUIAutomation {
                 }
 
                 return partialMatch ? candidate.contains(identifier) : candidate == identifier
+            }
+        }
+    }
+
+    private static func waitForElement(withTitle title: String, in root: AXUIElement) -> AXUIElement? {
+        waitUntil(timeout: 10) {
+            findElement(in: root) { element in
+                let value = stringValue(of: element)
+                return value == title
             }
         }
     }
@@ -410,6 +598,55 @@ public enum TerminalUIAutomation {
         }
 
         return nil
+    }
+
+    private static func countElements(identifierPrefix: String, in root: AXUIElement) -> Int {
+        identifiers(matchingPrefix: identifierPrefix, in: root).count
+    }
+
+    private static func countElements(in root: AXUIElement, matcher: (AXUIElement) -> Bool) -> Int {
+        var total = matcher(root) ? 1 : 0
+        guard let children = copyAttribute(root, attribute: kAXChildrenAttribute) as? [AXUIElement] else {
+            return total
+        }
+
+        for child in children {
+            total += countElements(in: child, matcher: matcher)
+        }
+
+        return total
+    }
+
+    private static func identifiers(matchingPrefix prefix: String, in root: AXUIElement) -> Set<String> {
+        var matches: Set<String> = []
+        if let identifier = copyAttribute(root, attribute: kAXIdentifierAttribute) as? String, identifier.hasPrefix(prefix) {
+            matches.insert(identifier)
+        }
+
+        guard let children = copyAttribute(root, attribute: kAXChildrenAttribute) as? [AXUIElement] else {
+            return matches
+        }
+
+        for child in children {
+            matches.formUnion(identifiers(matchingPrefix: prefix, in: child))
+        }
+
+        return matches
+    }
+
+    private static func containsText(_ text: String, in root: AXUIElement) -> Bool {
+        findElement(in: root) { element in
+            let title = copyAttribute(element, attribute: kAXTitleAttribute) as? String
+            let value = copyAttribute(element, attribute: kAXValueAttribute) as? String
+            let description = copyAttribute(element, attribute: kAXDescriptionAttribute) as? String
+            return title == text || value == text || description == text
+        } != nil
+    }
+
+    private static func containsRole(_ role: String, in root: AXUIElement) -> Bool {
+        findElement(in: root) { element in
+            (copyAttribute(element, attribute: kAXRoleAttribute) as? String) == role
+        } != nil
     }
 
     private static func frame(of element: AXUIElement) throws -> CGRect {
@@ -520,6 +757,110 @@ public enum TerminalUIAutomation {
         let result = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
         guard result == .success else { return nil }
         return value
+    }
+
+    private static func stringValue(of element: AXUIElement) -> String? {
+        if let value = copyAttribute(element, attribute: kAXValueAttribute) as? String {
+            return value
+        }
+
+        if let title = copyAttribute(element, attribute: kAXTitleAttribute) as? String {
+            return title
+        }
+
+        return nil
+    }
+
+    private static func workspaceForSinglePane(_ pane: WorkspacePane) -> Workspace {
+        let window = WorkspaceWindow(title: "Main", panes: [pane])
+        let session = WorkspaceSession(name: "Main Session", windows: [window])
+        return Workspace(sessions: [session])
+    }
+
+    private static func runFilePickerTest(
+        appExecutableURL: URL,
+        workspace: Workspace,
+        selectedFilePath: String,
+        buttonIdentifier: String,
+        fieldIdentifier: String
+    ) throws -> FilePickerTestResult {
+        guard AXIsProcessTrusted() else {
+            throw TerminalUITestError.accessibilityUnavailable
+        }
+
+        terminateExistingAppInstances()
+        let workspaceURL = temporaryWorkspaceURL()
+        let automationDirectory = temporaryAutomationDirectory()
+        try WorkspaceStore.save(workspace, to: workspaceURL)
+        defer {
+            cleanupTemporaryWorkspace(at: workspaceURL)
+            cleanupTemporaryDirectory(at: automationDirectory)
+        }
+
+        let process = Process()
+        process.executableURL = appExecutableURL
+        process.environment = mergedEnvironment(
+            with: workspaceURL,
+            automationDirectory: automationDirectory,
+            extra: ["MYIDE_AUTOMATION_SELECTED_FILE": selectedFilePath]
+        )
+        try process.run()
+        defer {
+            if process.isRunning {
+                process.terminate()
+                process.waitUntilExit()
+            }
+        }
+
+        guard let app = waitForRunningApplication(pid: process.processIdentifier) else {
+            throw TerminalUITestError.appLaunchFailed
+        }
+
+        app.activate(options: [.activateAllWindows])
+        waitFor(seconds: 0.5)
+
+        let appElement = AXUIElementCreateApplication(process.processIdentifier)
+        guard let windowElement = waitForWindow(in: appElement) else {
+            throw TerminalUITestError.appWindowNotFound
+        }
+
+        let buttonElement = waitForElement(identifier: buttonIdentifier, in: windowElement)
+            ?? waitForElement(withTitle: "Browse…", in: windowElement)
+        guard let buttonElement else {
+            throw TerminalUITestError.surfaceNotFound
+        }
+
+        let buttonFrame = try frame(of: buttonElement)
+        click(at: CGPoint(x: buttonFrame.midX, y: buttonFrame.midY))
+
+        guard let fieldValue = waitUntil(timeout: 5, pollInterval: 0.1, body: { () -> String? in
+            selectedFilePathFromWorkspace(in: workspaceURL, preferredFieldIdentifier: fieldIdentifier)
+        }) else {
+            throw TerminalUITestError.transcriptExpectationFailed(selectedFilePath)
+        }
+
+        return FilePickerTestResult(selectedPath: fieldValue)
+    }
+
+    private static func selectedFilePathFromWorkspace(in workspaceURL: URL, preferredFieldIdentifier: String) -> String? {
+        guard let workspace = try? WorkspaceStore.load(from: workspaceURL),
+              let pane = workspace.sessions.first?.windows.first?.panes.first else {
+            return nil
+        }
+
+        if preferredFieldIdentifier.contains("preview") {
+            return pane.preview?.filePath
+        }
+
+        if preferredFieldIdentifier.contains("diff-left") {
+            return pane.diff?.leftPath
+        }
+
+        if preferredFieldIdentifier.contains("diff-right") {
+            return pane.diff?.rightPath
+        }
+
+        return nil
     }
 
     private static func waitUntil<T>(timeout: TimeInterval, pollInterval: TimeInterval = 0.1, body: () -> T?) -> T? {

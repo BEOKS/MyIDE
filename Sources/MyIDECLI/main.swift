@@ -108,33 +108,31 @@ private struct CLI {
             let typedText = try requiredOption("typed-text", in: options)
             let result = TerminalInteractionHarness.checkClickAndTyping(typedText: typedText)
             try printJSON(result)
-        case "ui-check-terminal-input":
+        case "headless-check-terminal-input", "ui-check-terminal-input":
             let typedText = try requiredOption("typed-text", in: options)
-            let appURL = URL(fileURLWithPath: CommandLine.arguments[0])
-                .deletingLastPathComponent()
-                .appendingPathComponent("MyIDESampleMacApp")
-            let result = try TerminalUIAutomation.runTerminalClickTypingTest(
-                appExecutableURL: appURL,
-                typedText: typedText
-            )
+            let result = TerminalHeadlessHarness.checkClickAndTyping(typedText: typedText)
             try printJSON(result)
-        case "ui-run-terminal-command":
+        case "headless-run-terminal-command", "ui-run-terminal-command":
             let command = try requiredOption("command", in: options)
             let expectedOutput = try requiredOption("expected-output", in: options)
-            let appURL = URL(fileURLWithPath: CommandLine.arguments[0])
-                .deletingLastPathComponent()
-                .appendingPathComponent("MyIDESampleMacApp")
-            let result = try TerminalUIAutomation.runTerminalCommandTest(
-                appExecutableURL: appURL,
-                command: command,
-                expectedOutput: expectedOutput
-            )
+            let result = try TerminalHeadlessHarness.runCommand(command, expecting: expectedOutput)
             try printJSON(result)
-        case "ui-check-terminal-layout":
-            let appURL = URL(fileURLWithPath: CommandLine.arguments[0])
-                .deletingLastPathComponent()
-                .appendingPathComponent("MyIDESampleMacApp")
-            let result = try TerminalUIAutomation.runTerminalLayoutTest(appExecutableURL: appURL)
+        case "headless-check-terminal-layout", "ui-check-terminal-layout":
+            let result = TerminalHeadlessHarness.checkLayout()
+            try printJSON(result)
+        case "headless-check-pane-chrome", "ui-check-pane-chrome":
+            let result = TerminalHeadlessHarness.checkPaneChrome()
+            try printJSON(result)
+        case "headless-send-terminal-eot", "ui-send-terminal-eot":
+            let result = TerminalHeadlessHarness.checkEndOfTransmissionClosesPane()
+            try printJSON(result)
+        case "headless-select-preview-file", "ui-select-preview-file":
+            let selectedFile = try requiredOption("selected-file", in: options)
+            let result = TerminalHeadlessHarness.selectPreviewFile(selectedFile)
+            try printJSON(result)
+        case "headless-select-diff-file", "ui-select-diff-file":
+            let selectedFile = try requiredOption("selected-file", in: options)
+            let result = TerminalHeadlessHarness.selectDiffFile(selectedFile)
             try printJSON(result)
         case "debug-terminal-ancestry":
             let appURL = URL(fileURLWithPath: CommandLine.arguments[0])
@@ -247,8 +245,12 @@ private struct CLI {
       refresh-diff --workspace PATH --session-id ID --window-id ID --pane-id ID
       render-markdown --file PATH
       check-terminal-input --typed-text TEXT
-      ui-check-terminal-input --typed-text TEXT
-      ui-run-terminal-command --command COMMAND --expected-output TEXT
-      ui-check-terminal-layout
+      headless-check-terminal-input --typed-text TEXT
+      headless-run-terminal-command --command COMMAND --expected-output TEXT
+      headless-check-terminal-layout
+      headless-check-pane-chrome
+      headless-send-terminal-eot
+      headless-select-preview-file --selected-file PATH
+      headless-select-diff-file --selected-file PATH
     """
 }

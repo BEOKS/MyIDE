@@ -31,7 +31,9 @@ final class TerminalAutomationBridge {
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            self?.handle(notification)
+            MainActor.assumeIsolated { [weak self] in
+                self?.handle(notification)
+            }
         }
     }
 

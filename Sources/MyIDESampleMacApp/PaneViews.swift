@@ -1,12 +1,14 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 import MyIDECore
 
 struct PaneWorkspaceView: View {
     let panes: [WorkspacePane]
-    let onRemove: (String) -> Void
+    let onTerminalExit: (String) -> Void
     let onUpdateBrowser: (String, String) -> Void
     let onRefreshDiff: (String, String, String) -> Void
+    let onUpdateDiffPaths: (String, String, String) -> Void
     let onUpdatePreviewPath: (String, String) -> Void
 
     var body: some View {
@@ -59,15 +61,16 @@ struct PaneWorkspaceView: View {
 
     @ViewBuilder
     private func paneView(for pane: WorkspacePane) -> some View {
-        PaneContainer(title: pane.title, kind: pane.kind, onRemove: {
-            onRemove(pane.id)
-        }) {
+        PaneContainer(kind: pane.kind) {
             switch pane.kind {
             case .terminal:
                 if let terminal = pane.terminal {
                     TerminalPaneView(
                         paneID: pane.id,
-                        configuration: terminal
+                        configuration: terminal,
+                        onProcessTerminated: {
+                            onTerminalExit(pane.id)
+                        }
                     )
                 }
             case .browser:
@@ -83,6 +86,7 @@ struct PaneWorkspaceView: View {
                     DiffPaneView(
                         paneID: pane.id,
                         configuration: diff,
+                        onUpdatePaths: onUpdateDiffPaths,
                         onRefresh: onRefreshDiff
                     )
                 }
@@ -101,33 +105,21 @@ struct PaneWorkspaceView: View {
 }
 
 struct PaneContainer<Content: View>: View {
-    let title: String
     let kind: PaneKind
-    let onRemove: () -> Void
     @ViewBuilder let content: Content
+    private let chrome = PaneChromeConfiguration.minimal
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text(title)
-                    .font(.headline)
-                Spacer()
-                Text(kind.rawValue)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Button {
-                    onRemove()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
+        Group {
+            if chrome.showsTitle || chrome.showsCloseButton {
+                VStack(spacing: 0) {
+                    content
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .buttonStyle(.plain)
+            } else {
+                content
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .padding(12)
-
-            Divider()
-
-            content
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .accessibilityIdentifier("pane-container-\(kind.rawValue)")
@@ -144,10 +136,12 @@ struct PaneContainer<Content: View>: View {
 struct TerminalPaneView: View {
     let paneID: String
     let configuration: TerminalPaneConfiguration
+    let onProcessTerminated: () -> Void
 
-    init(paneID: String, configuration: TerminalPaneConfiguration) {
+    init(paneID: String, configuration: TerminalPaneConfiguration, onProcessTerminated: @escaping () -> Void) {
         self.paneID = paneID
         self.configuration = configuration
+        self.onProcessTerminated = onProcessTerminated
     }
 
     var body: some View {
@@ -172,7 +166,11 @@ struct TerminalPaneView: View {
             .background(Color.black.opacity(0.98))
 
             ZStack(alignment: .bottomLeading) {
-                TerminalCommandEditorRepresentable(paneID: paneID, configuration: configuration)
+                TerminalCommandEditorRepresentable(
+                    paneID: paneID,
+                    configuration: configuration,
+                    onProcessTerminated: onProcessTerminated
+                )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 HStack(spacing: 12) {
@@ -239,14 +237,21 @@ struct BrowserPaneView: View {
 struct DiffPaneView: View {
     let paneID: String
     let configuration: DiffPaneConfiguration
+    let onUpdatePaths: (String, String, String) -> Void
     let onRefresh: (String, String, String) -> Void
 
     @State private var leftPath: String
     @State private var rightPath: String
 
-    init(paneID: String, configuration: DiffPaneConfiguration, onRefresh: @escaping (String, String, String) -> Void) {
+    init(
+        paneID: String,
+        configuration: DiffPaneConfiguration,
+        onUpdatePaths: @escaping (String, String, String) -> Void,
+        onRefresh: @escaping (String, String, String) -> Void
+    ) {
         self.paneID = paneID
         self.configuration = configuration
+        self.onUpdatePaths = onUpdatePaths
         self.onRefresh = onRefresh
         _leftPath = State(initialValue: configuration.leftPath)
         _rightPath = State(initialValue: configuration.rightPath)
@@ -254,11 +259,35 @@ struct DiffPaneView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            TextField("Left file path", text: $leftPath)
-                .textFieldStyle(.roundedBorder)
+            HStack {
+                TextField("Left file path", text: $leftPath)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("diff-left-path-\(paneID)")
 
-            TextField("Right file path", text: $rightPath)
-                .textFieldStyle(.roundedBorder)
+                Button("Browse…") {
+                    guard let selectedPath = FileSelectionService.chooseFile(startingAt: leftPath) else {
+                        return
+                    }
+                    leftPath = selectedPath
+                    onUpdatePaths(paneID, leftPath, rightPath)
+                }
+                .accessibilityIdentifier("diff-left-browse-\(paneID)")
+            }
+
+            HStack {
+                TextField("Right file path", text: $rightPath)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("diff-right-path-\(paneID)")
+
+                Button("Browse…") {
+                    guard let selectedPath = FileSelectionService.chooseFile(startingAt: rightPath) else {
+                        return
+                    }
+                    rightPath = selectedPath
+                    onUpdatePaths(paneID, leftPath, rightPath)
+                }
+                .accessibilityIdentifier("diff-right-browse-\(paneID)")
+            }
 
             Button("Refresh Diff") {
                 onRefresh(paneID, leftPath, rightPath)
@@ -299,9 +328,23 @@ struct PreviewPaneView: View {
             HStack {
                 TextField("File path", text: $filePath)
                     .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("preview-file-path-\(paneID)")
                     .onSubmit {
                         onUpdatePath(paneID, filePath)
                     }
+
+                Button("Browse…") {
+                    guard let selectedPath = FileSelectionService.chooseFile(
+                        startingAt: filePath,
+                        allowedContentTypes: allowedContentTypes
+                    ) else {
+                        return
+                    }
+
+                    filePath = selectedPath
+                    onUpdatePath(paneID, selectedPath)
+                }
+                .accessibilityIdentifier("preview-file-browse-\(paneID)")
 
                 Button("Load") {
                     onUpdatePath(paneID, filePath)
@@ -319,6 +362,17 @@ struct PreviewPaneView: View {
             }
         }
         .padding(12)
+    }
+
+    private var allowedContentTypes: [UTType] {
+        switch kind {
+        case .markdownPreview:
+            return [.plainText, .utf8PlainText, .text, .sourceCode]
+        case .imagePreview:
+            return [.image]
+        default:
+            return []
+        }
     }
 }
 
@@ -355,13 +409,34 @@ struct AddPaneSheet: View {
                 TextField("URL", text: $draft.browserURL)
                     .textFieldStyle(.roundedBorder)
             case .diff:
-                TextField("Left file path", text: $draft.leftPath)
-                    .textFieldStyle(.roundedBorder)
-                TextField("Right file path", text: $draft.rightPath)
-                    .textFieldStyle(.roundedBorder)
+                HStack {
+                    TextField("Left file path", text: $draft.leftPath)
+                        .textFieldStyle(.roundedBorder)
+
+                    Button("Browse…") {
+                        draft.leftPath = FileSelectionService.chooseFile(startingAt: draft.leftPath) ?? draft.leftPath
+                    }
+                }
+                HStack {
+                    TextField("Right file path", text: $draft.rightPath)
+                        .textFieldStyle(.roundedBorder)
+
+                    Button("Browse…") {
+                        draft.rightPath = FileSelectionService.chooseFile(startingAt: draft.rightPath) ?? draft.rightPath
+                    }
+                }
             case .markdownPreview, .imagePreview:
-                TextField("File path", text: $draft.filePath)
-                    .textFieldStyle(.roundedBorder)
+                HStack {
+                    TextField("File path", text: $draft.filePath)
+                        .textFieldStyle(.roundedBorder)
+
+                    Button("Browse…") {
+                        draft.filePath = FileSelectionService.chooseFile(
+                            startingAt: draft.filePath,
+                            allowedContentTypes: draft.kind == .imagePreview ? [.image] : [.plainText, .utf8PlainText, .text, .sourceCode]
+                        ) ?? draft.filePath
+                    }
+                }
             }
 
             Spacer()

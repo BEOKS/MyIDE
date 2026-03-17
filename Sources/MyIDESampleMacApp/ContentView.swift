@@ -75,7 +75,7 @@ struct ContentView: View {
         if let window = viewModel.selectedWindow {
             PaneWorkspaceView(
                 panes: window.panes,
-                onRemove: { paneID in
+                onTerminalExit: { paneID in
                     viewModel.removePane(paneID)
                 },
                 onUpdateBrowser: { paneID, urlString in
@@ -83,6 +83,9 @@ struct ContentView: View {
                 },
                 onRefreshDiff: { paneID, leftPath, rightPath in
                     viewModel.refreshDiffPane(paneID: paneID, leftPath: leftPath, rightPath: rightPath)
+                },
+                onUpdateDiffPaths: { paneID, leftPath, rightPath in
+                    viewModel.updateDiffPanePaths(paneID: paneID, leftPath: leftPath, rightPath: rightPath)
                 },
                 onUpdatePreviewPath: { paneID, filePath in
                     viewModel.updatePreviewPanePath(paneID: paneID, filePath: filePath)

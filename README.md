@@ -31,3 +31,5 @@ swift run MyIDECLI help
 npm install
 npm run bdd
 ```
+
+See `TESTING.md` for the automation rules. All automated tests must stay headless and must not launch a foreground app window or steal focus from the active desktop session.
