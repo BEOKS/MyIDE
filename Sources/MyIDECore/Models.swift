@@ -1,11 +1,33 @@
 import Foundation
 
 public enum PaneKind: String, Codable, CaseIterable {
+    case picker
     case terminal
     case browser
     case diff
     case markdownPreview
     case imagePreview
+
+    public static var creatableCases: [PaneKind] {
+        [.terminal, .browser, .diff, .markdownPreview, .imagePreview]
+    }
+
+    public var displayTitle: String {
+        switch self {
+        case .picker:
+            return "Choose Pane"
+        case .terminal:
+            return "Terminal"
+        case .browser:
+            return "Browser"
+        case .diff:
+            return "Diff"
+        case .markdownPreview:
+            return "Markdown"
+        case .imagePreview:
+            return "Image"
+        }
+    }
 }
 
 public enum PaneSplitAxis: String, Codable, Sendable {
@@ -452,6 +474,13 @@ public struct WorkspacePane: Codable, Identifiable {
             title: title,
             kind: .imagePreview,
             preview: PreviewPaneConfiguration(filePath: filePath)
+        )
+    }
+
+    public static func picker(title: String = "New Pane") -> WorkspacePane {
+        WorkspacePane(
+            title: title,
+            kind: .picker
         )
     }
 }

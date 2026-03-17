@@ -124,6 +124,9 @@ struct ContentView: View {
                 },
                 onUpdatePreviewPath: { paneID, filePath in
                     viewModel.updatePreviewPanePath(sessionID: sessionID, windowID: window.id, paneID: paneID, filePath: filePath)
+                },
+                onConfigurePane: { paneID, kind in
+                    viewModel.configurePane(sessionID: sessionID, windowID: window.id, paneID: paneID, kind: kind)
                 }
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -199,20 +202,17 @@ struct ContentView: View {
             return false
         }
 
-        let flags = event.modifierFlags.intersection([.control, .shift, .command, .option])
-        guard flags == [.control, .shift], let characters = event.charactersIgnoringModifiers else {
+        guard let action = PaneShortcutAction.resolve(event: event, selectedPaneKind: selectedPane?.kind) else {
             return false
         }
 
-        switch characters {
-        case "%":
-            splitCurrentPane(axis: .vertical)
+        switch action {
+        case .split(let axis):
+            splitCurrentPane(axis: axis)
             return true
-        case "\"":
-            splitCurrentPane(axis: .horizontal)
+        case .closeSelectedPane:
+            closeSelectedPane()
             return true
-        default:
-            return false
         }
     }
 
@@ -221,7 +221,7 @@ struct ContentView: View {
             return
         }
 
-        if let pane = viewModel.splitWithTerminalPane(
+        if let pane = viewModel.splitWithPanePicker(
             sessionID: sessionID,
             windowID: selectedWindowID,
             paneID: selectedPaneID,
@@ -229,5 +229,21 @@ struct ContentView: View {
         ) {
             selectedPaneID = pane.id
         }
+    }
+
+    private func closeSelectedPane() {
+        guard let selectedWindowID, let selectedPaneID else {
+            return
+        }
+
+        viewModel.removePane(sessionID: sessionID, windowID: selectedWindowID, paneID: selectedPaneID)
+    }
+
+    private var selectedPane: WorkspacePane? {
+        guard let selectedWindow, let selectedPaneID else {
+            return nil
+        }
+
+        return selectedWindow.panes.first(where: { $0.id == selectedPaneID })
     }
 }

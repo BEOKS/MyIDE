@@ -44,6 +44,7 @@ struct PaneWorkspaceView: View {
     let onRefreshDiff: (String, String, String) -> Void
     let onUpdateDiffPaths: (String, String, String) -> Void
     let onUpdatePreviewPath: (String, String) -> Void
+    let onConfigurePane: (String, PaneKind) -> Void
 
     var body: some View {
         Group {
@@ -99,6 +100,11 @@ struct PaneWorkspaceView: View {
             }
         ) {
             switch pane.kind {
+            case .picker:
+                PanePickerPaneView(
+                    paneID: pane.id,
+                    onConfigurePane: onConfigurePane
+                )
             case .terminal:
                 if let terminal = pane.terminal {
                     TerminalPaneView(
@@ -176,6 +182,80 @@ struct PaneContainer<Content: View>: View {
             )
             .allowsHitTesting(false)
         )
+    }
+}
+
+struct PanePickerPaneView: View {
+    let paneID: String
+    let onConfigurePane: (String, PaneKind) -> Void
+
+    private let columns = [
+        GridItem(.flexible(), spacing: 12),
+        GridItem(.flexible(), spacing: 12)
+    ]
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(nsColor: .windowBackgroundColor),
+                    Color.accentColor.opacity(0.08)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            VStack(spacing: 20) {
+                VStack(spacing: 8) {
+                    Text("Choose a pane")
+                        .font(.title3.weight(.semibold))
+                    Text("Pick what should open in this split.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
+                LazyVGrid(columns: columns, spacing: 12) {
+                    ForEach(PaneKind.creatableCases, id: \.self) { kind in
+                        Button {
+                            onConfigurePane(paneID, kind)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(kind.displayTitle)
+                                    .font(.headline)
+                                Text(description(for: kind))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.leading)
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 84, alignment: .leading)
+                            .padding(14)
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .frame(maxWidth: 440)
+            }
+            .padding(24)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func description(for kind: PaneKind) -> String {
+        switch kind {
+        case .picker:
+            return ""
+        case .terminal:
+            return "Run commands in an interactive shell."
+        case .browser:
+            return "Open docs, dashboards, or local apps."
+        case .diff:
+            return "Compare two files side by side."
+        case .markdownPreview:
+            return "Render a markdown file live."
+        case .imagePreview:
+            return "Inspect image assets quickly."
+        }
     }
 }
 
@@ -399,6 +479,8 @@ struct PreviewPaneView: View {
             }
 
             switch kind {
+            case .picker:
+                Text("Select a pane type")
             case .markdownPreview:
                 MarkdownPreviewContent(filePath: configuration.filePath)
             case .imagePreview:
@@ -412,6 +494,8 @@ struct PreviewPaneView: View {
 
     private var allowedContentTypes: [UTType] {
         switch kind {
+        case .picker:
+            return []
         case .markdownPreview:
             return [.plainText, .utf8PlainText, .text, .sourceCode]
         case .imagePreview:
@@ -437,14 +521,14 @@ struct AddPaneSheet: View {
                 .textFieldStyle(.roundedBorder)
 
             Picker("Kind", selection: $draft.kind) {
-                Text("Terminal").tag(PaneKind.terminal)
-                Text("Browser").tag(PaneKind.browser)
-                Text("Diff").tag(PaneKind.diff)
-                Text("Markdown Preview").tag(PaneKind.markdownPreview)
-                Text("Image Preview").tag(PaneKind.imagePreview)
+                ForEach(PaneKind.creatableCases, id: \.self) { kind in
+                    Text(kind.displayTitle).tag(kind)
+                }
             }
 
             switch draft.kind {
+            case .picker:
+                EmptyView()
             case .terminal:
                 Picker("Terminal App", selection: $draft.terminalProvider) {
                     ForEach(TerminalProvider.allCases, id: \.self) { provider in

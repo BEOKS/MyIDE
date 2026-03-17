@@ -355,6 +355,18 @@ public enum TerminalHeadlessHarness {
         )
     }
 
+    public static func checkBrowserAndMarkdownPaneCloseShortcuts() throws -> PaneCloseShortcutResult {
+        let browserClosed = try checkCloseShortcutRemovesPane(kind: .browser)
+        let markdownClosed = try checkCloseShortcutRemovesPane(kind: .markdownPreview)
+        let terminalIgnored = try checkCloseShortcutIgnored(kind: .terminal)
+
+        return PaneCloseShortcutResult(
+            browserPaneClosed: browserClosed,
+            markdownPaneClosed: markdownClosed,
+            terminalPaneIgnoredByWindowShortcut: terminalIgnored
+        )
+    }
+
     public static func checkTmuxSplitShortcutKeyMatching() throws -> TmuxSplitKeyMatchResult {
         // Test that NSEvent with Ctrl+Shift produces correct charactersIgnoringModifiers
         let verticalEvent = NSEvent.keyEvent(
@@ -768,6 +780,72 @@ public enum TerminalHeadlessHarness {
 
         return nil
     }
+
+    private static func checkCloseShortcutRemovesPane(kind: PaneKind) throws -> Bool {
+        var workspace = Workspace.empty()
+        let session = workspace.addSession(named: "Session 1")
+        let window = try workspace.addWindow(toSessionID: session.id, title: "Main")
+        let pane = makePane(for: kind)
+        try workspace.addPane(pane, toSessionID: session.id, windowID: window.id)
+
+        guard let event = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [.control],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "\u{04}",
+            charactersIgnoringModifiers: "d",
+            isARepeat: false,
+            keyCode: 2
+        ) else {
+            return false
+        }
+
+        guard PaneShortcutAction.resolve(event: event, selectedPaneKind: kind) == .closeSelectedPane else {
+            return false
+        }
+
+        try workspace.removePane(sessionID: session.id, windowID: window.id, paneID: pane.id)
+        return try workspace.window(sessionID: session.id, windowID: window.id).panes.isEmpty
+    }
+
+    private static func checkCloseShortcutIgnored(kind: PaneKind) throws -> Bool {
+        guard let event = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [.control],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "\u{04}",
+            charactersIgnoringModifiers: "d",
+            isARepeat: false,
+            keyCode: 2
+        ) else {
+            return false
+        }
+
+        return PaneShortcutAction.resolve(event: event, selectedPaneKind: kind) == nil
+    }
+
+    private static func makePane(for kind: PaneKind) -> WorkspacePane {
+        switch kind {
+        case .picker:
+            return .picker()
+        case .terminal:
+            return .terminal(title: "Shell", provider: .terminal, workingDirectory: FileManager.default.currentDirectoryPath)
+        case .browser:
+            return .browser(title: "Docs", urlString: "https://swift.org")
+        case .diff:
+            return .diff(title: "Diff", leftPath: "before.txt", rightPath: "after.txt")
+        case .markdownPreview:
+            return .markdownPreview(title: "Preview", filePath: "README.md")
+        case .imagePreview:
+            return .imagePreview(title: "Image", filePath: "image.png")
+        }
+    }
 }
 
 public struct SessionWindowSemanticsResult: Codable, Sendable {
@@ -908,6 +986,18 @@ public struct TmuxSplitKeyMatchResult: Codable, Sendable {
         self.verticalKeyMatched = verticalKeyMatched
         self.horizontalKeyMatched = horizontalKeyMatched
         self.paneCountAfterSplits = paneCountAfterSplits
+    }
+}
+
+public struct PaneCloseShortcutResult: Codable, Sendable {
+    public var browserPaneClosed: Bool
+    public var markdownPaneClosed: Bool
+    public var terminalPaneIgnoredByWindowShortcut: Bool
+
+    public init(browserPaneClosed: Bool, markdownPaneClosed: Bool, terminalPaneIgnoredByWindowShortcut: Bool) {
+        self.browserPaneClosed = browserPaneClosed
+        self.markdownPaneClosed = markdownPaneClosed
+        self.terminalPaneIgnoredByWindowShortcut = terminalPaneIgnoredByWindowShortcut
     }
 }
 

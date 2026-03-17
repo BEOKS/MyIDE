@@ -659,6 +659,10 @@ When('I headless-check tmux split key matching', function () {
   this.splitKeyResult = this.runCliJson('headless-check-tmux-split-key-matching')
 })
 
+When('I headless-check pane close shortcuts', function () {
+  this.paneCloseShortcutResult = this.runCliJson('headless-check-pane-close-shortcuts')
+})
+
 Then('the vertical split key should match {string}', function (_char) {
   assert.equal(this.splitKeyResult.verticalKeyMatched, true)
 })
@@ -669,6 +673,18 @@ Then('the horizontal split key should match the quote character', function () {
 
 Then('the key-matched splits should produce {int} panes', function (count) {
   assert.equal(this.splitKeyResult.paneCountAfterSplits, count)
+})
+
+Then('the browser pane should close from the window shortcut', function () {
+  assert.equal(this.paneCloseShortcutResult.browserPaneClosed, true)
+})
+
+Then('the markdown pane should close from the window shortcut', function () {
+  assert.equal(this.paneCloseShortcutResult.markdownPaneClosed, true)
+})
+
+Then('the terminal pane should ignore the window close shortcut', function () {
+  assert.equal(this.paneCloseShortcutResult.terminalPaneIgnoredByWindowShortcut, true)
 })
 
 Then('the nested split root ratio should be {float}', function (ratio) {

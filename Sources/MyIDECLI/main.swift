@@ -253,6 +253,9 @@ private struct CLI {
         case "headless-check-tmux-split-key-matching":
             let result = try TerminalHeadlessHarness.checkTmuxSplitShortcutKeyMatching()
             try printJSON(result)
+        case "headless-check-pane-close-shortcuts":
+            let result = try TerminalHeadlessHarness.checkBrowserAndMarkdownPaneCloseShortcuts()
+            try printJSON(result)
         case "debug-terminal-ancestry":
             let appURL = URL(fileURLWithPath: CommandLine.arguments[0])
                 .deletingLastPathComponent()
@@ -296,6 +299,8 @@ private struct CLI {
         }
 
         switch pane.kind {
+        case .picker:
+            break
         case .terminal:
             guard var terminal = pane.terminal else {
                 throw WorkspaceError.invalidPane("Terminal pane is not configured")
@@ -456,5 +461,6 @@ private struct CLI {
       headless-check-ime-composition
       headless-check-delete-line-shortcut
       headless-check-tmux-split-shortcuts
+      headless-check-pane-close-shortcuts
     """
 }

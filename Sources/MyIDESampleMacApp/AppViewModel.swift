@@ -96,13 +96,9 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    func splitWithTerminalPane(sessionID: String, windowID: String, paneID: String?, axis: PaneSplitAxis) -> WorkspacePane? {
+    func splitWithPanePicker(sessionID: String, windowID: String, paneID: String?, axis: PaneSplitAxis) -> WorkspacePane? {
         do {
-            let pane = WorkspacePane.terminal(
-                title: "Terminal",
-                provider: .terminal,
-                workingDirectory: FileManager.default.currentDirectoryPath
-            )
+            let pane = WorkspacePane.picker()
             let newPane = try workspace.splitPane(
                 sessionID: sessionID,
                 windowID: windowID,
@@ -115,6 +111,16 @@ final class AppViewModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
             return nil
+        }
+    }
+
+    func configurePane(sessionID: String, windowID: String, paneID: String, kind: PaneKind) {
+        guard kind != .picker else {
+            return
+        }
+
+        mutatePane(sessionID: sessionID, windowID: windowID, paneID: paneID) { pane in
+            pane = AddPaneDraft.defaultDraft(for: kind).makePane(id: paneID)
         }
     }
 
@@ -241,34 +247,60 @@ struct AddPaneDraft {
     var rightPath = ""
     var filePath = ""
 
-    func makePane() -> WorkspacePane {
+    static func defaultDraft(for kind: PaneKind) -> AddPaneDraft {
+        var draft = AddPaneDraft()
+        draft.kind = kind
+        return draft
+    }
+
+    func makePane(id: String = UUID().uuidString) -> WorkspacePane {
         switch kind {
+        case .picker:
+            return .picker(title: title.isEmpty ? "New Pane" : title)
         case .terminal:
-            return .terminal(
+            return WorkspacePane(
+                id: id,
                 title: title.isEmpty ? "Terminal" : title,
-                provider: terminalProvider,
-                workingDirectory: FileManager.default.currentDirectoryPath
+                kind: .terminal,
+                terminal: TerminalPaneConfiguration(
+                    provider: terminalProvider,
+                    workingDirectory: FileManager.default.currentDirectoryPath,
+                    lastCommand: "",
+                    lastOutput: "",
+                    lastExitCode: nil
+                )
             )
         case .browser:
-            return .browser(
+            return WorkspacePane(
+                id: id,
                 title: title.isEmpty ? "Browser" : title,
-                urlString: browserURL
+                kind: .browser,
+                browser: BrowserPaneConfiguration(urlString: browserURL)
             )
         case .diff:
-            return .diff(
+            return WorkspacePane(
+                id: id,
                 title: title.isEmpty ? "Diff" : title,
-                leftPath: leftPath,
-                rightPath: rightPath
+                kind: .diff,
+                diff: DiffPaneConfiguration(
+                    leftPath: leftPath,
+                    rightPath: rightPath,
+                    lastDiff: ""
+                )
             )
         case .markdownPreview:
-            return .markdownPreview(
+            return WorkspacePane(
+                id: id,
                 title: title.isEmpty ? "Markdown" : title,
-                filePath: filePath
+                kind: .markdownPreview,
+                preview: PreviewPaneConfiguration(filePath: filePath)
             )
         case .imagePreview:
-            return .imagePreview(
+            return WorkspacePane(
+                id: id,
                 title: title.isEmpty ? "Image" : title,
-                filePath: filePath
+                kind: .imagePreview,
+                preview: PreviewPaneConfiguration(filePath: filePath)
             )
         }
     }

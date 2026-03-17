@@ -73,3 +73,9 @@ Feature: Regression prevention
     Then the vertical split key should match "%"
     And the horizontal split key should match the quote character
     And the key-matched splits should produce 3 panes
+
+  Scenario: Ctrl+D closes browser and markdown panes without hijacking terminal EOT
+    When I headless-check pane close shortcuts
+    Then the browser pane should close from the window shortcut
+    And the markdown pane should close from the window shortcut
+    And the terminal pane should ignore the window close shortcut
