@@ -4,8 +4,6 @@ import MyIDECore
 @MainActor
 final class AppViewModel: ObservableObject {
     @Published private(set) var workspace: Workspace
-    @Published var selectedSessionID: String?
-    @Published var selectedWindowID: String?
     @Published var showingAddPaneSheet = false
     @Published var errorMessage: String?
 
@@ -21,83 +19,55 @@ final class AppViewModel: ObservableObject {
             errorMessage = error.localizedDescription
         }
 
-        if let session = workspace.sessions.first {
-            selectedSessionID = session.id
-            selectedWindowID = session.windows.first?.id
-        }
     }
 
-    var selectedSession: WorkspaceSession? {
-        guard let selectedSessionID else { return nil }
-        return workspace.sessions.first(where: { $0.id == selectedSessionID })
+    func session(id: String) -> WorkspaceSession? {
+        workspace.sessions.first(where: { $0.id == id })
     }
 
-    var selectedWindow: WorkspaceWindow? {
-        guard let selectedSession, let selectedWindowID else { return nil }
-        return selectedSession.windows.first(where: { $0.id == selectedWindowID })
-    }
-
-    func select(sessionID: String, windowID: String) {
-        selectedSessionID = sessionID
-        selectedWindowID = windowID
-    }
-
-    func addSession() {
+    func addSession() -> WorkspaceSession? {
         let name = "Session \(workspace.sessions.count + 1)"
         let session = workspace.addSession(named: name)
-        do {
-            let window = try workspace.addWindow(toSessionID: session.id, title: "Window 1")
-            select(sessionID: session.id, windowID: window.id)
-            persist()
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        persist()
+        return session
     }
 
-    func addWindow() {
-        guard let selectedSessionID else {
-            addSession()
-            return
-        }
-
+    func addWindow(to sessionID: String) -> WorkspaceWindow? {
         do {
-            let session = try requireSelectedSession()
+            let session = try requireSession(id: sessionID)
             let window = try workspace.addWindow(
-                toSessionID: selectedSessionID,
+                toSessionID: sessionID,
                 title: "Window \(session.windows.count + 1)"
             )
-            selectedWindowID = window.id
             persist()
+            return window
         } catch {
             errorMessage = error.localizedDescription
+            return nil
         }
     }
 
-    func addPane(draft: AddPaneDraft) {
-        guard let selectedSessionID, let selectedWindowID else { return }
-
+    func addPane(sessionID: String, windowID: String, draft: AddPaneDraft) {
         do {
             let pane = draft.makePane()
-            try workspace.addPane(pane, toSessionID: selectedSessionID, windowID: selectedWindowID)
+            try workspace.addPane(pane, toSessionID: sessionID, windowID: windowID)
             persist()
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    func removePane(_ paneID: String) {
-        guard let selectedSessionID, let selectedWindowID else { return }
-
+    func removePane(sessionID: String, windowID: String, paneID: String) {
         do {
-            try workspace.removePane(sessionID: selectedSessionID, windowID: selectedWindowID, paneID: paneID)
+            try workspace.removePane(sessionID: sessionID, windowID: windowID, paneID: paneID)
             persist()
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    func updateBrowserPane(paneID: String, urlString: String) {
-        mutatePane(paneID: paneID) { pane in
+    func updateBrowserPane(sessionID: String, windowID: String, paneID: String, urlString: String) {
+        mutatePane(sessionID: sessionID, windowID: windowID, paneID: paneID) { pane in
             guard var browser = pane.browser else {
                 throw WorkspaceError.invalidPane("Browser pane is not configured")
             }
@@ -106,8 +76,8 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    func refreshDiffPane(paneID: String, leftPath: String, rightPath: String) {
-        mutatePane(paneID: paneID) { pane in
+    func refreshDiffPane(sessionID: String, windowID: String, paneID: String, leftPath: String, rightPath: String) {
+        mutatePane(sessionID: sessionID, windowID: windowID, paneID: paneID) { pane in
             guard var diff = pane.diff else {
                 throw WorkspaceError.invalidPane("Diff pane is not configured")
             }
@@ -118,8 +88,8 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    func updateDiffPanePaths(paneID: String, leftPath: String, rightPath: String) {
-        mutatePane(paneID: paneID) { pane in
+    func updateDiffPanePaths(sessionID: String, windowID: String, paneID: String, leftPath: String, rightPath: String) {
+        mutatePane(sessionID: sessionID, windowID: windowID, paneID: paneID) { pane in
             guard var diff = pane.diff else {
                 throw WorkspaceError.invalidPane("Diff pane is not configured")
             }
@@ -129,8 +99,8 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    func updatePreviewPanePath(paneID: String, filePath: String) {
-        mutatePane(paneID: paneID) { pane in
+    func updatePreviewPanePath(sessionID: String, windowID: String, paneID: String, filePath: String) {
+        mutatePane(sessionID: sessionID, windowID: windowID, paneID: paneID) { pane in
             guard var preview = pane.preview else {
                 throw WorkspaceError.invalidPane("Preview pane is not configured")
             }
@@ -144,13 +114,24 @@ final class AppViewModel: ObservableObject {
         _ = command
     }
 
-    private func mutatePane(paneID: String, update: (inout WorkspacePane) throws -> Void) {
-        guard let selectedSessionID, let selectedWindowID else { return }
+    func window(sessionID: String, windowID: String) -> WorkspaceWindow? {
+        guard let session = session(id: sessionID) else {
+            return nil
+        }
 
+        return session.windows.first(where: { $0.id == windowID })
+    }
+
+    private func mutatePane(
+        sessionID: String,
+        windowID: String,
+        paneID: String,
+        update: (inout WorkspacePane) throws -> Void
+    ) {
         do {
             try workspace.updatePane(
-                sessionID: selectedSessionID,
-                windowID: selectedWindowID,
+                sessionID: sessionID,
+                windowID: windowID,
                 paneID: paneID,
                 using: update
             )
@@ -160,9 +141,8 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    private func requireSelectedSession() throws -> WorkspaceSession {
-        guard let selectedSessionID,
-              let session = workspace.sessions.first(where: { $0.id == selectedSessionID }) else {
+    private func requireSession(id: String) throws -> WorkspaceSession {
+        guard let session = workspace.sessions.first(where: { $0.id == id }) else {
             throw WorkspaceError.invalidPane("No session selected")
         }
 

@@ -95,6 +95,10 @@ public struct Workspace: Codable {
         return pane
     }
 
+    public func windowTitles(sessionID: String) throws -> [String] {
+        try windowList(sessionID: sessionID).map(\.title)
+    }
+
     public mutating func addSession(named name: String) -> WorkspaceSession {
         let session = WorkspaceSession(name: name, windows: [])
         sessions.append(session)
@@ -157,6 +161,14 @@ public struct Workspace: Codable {
         }
 
         sessions[sessionIndex].windows[windowIndex].panes.removeAll { $0.id == paneID }
+    }
+
+    private func windowList(sessionID: String) throws -> [WorkspaceWindow] {
+        guard let session = session(withID: sessionID) else {
+            throw WorkspaceError.sessionNotFound(sessionID)
+        }
+
+        return session.windows
     }
 }
 

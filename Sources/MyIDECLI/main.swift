@@ -134,6 +134,15 @@ private struct CLI {
             let selectedFile = try requiredOption("selected-file", in: options)
             let result = TerminalHeadlessHarness.selectDiffFile(selectedFile)
             try printJSON(result)
+        case "headless-check-session-window-semantics":
+            let result = try TerminalHeadlessHarness.checkSessionWindowSemantics()
+            try printJSON(result)
+        case "headless-check-empty-window-switch":
+            let result = try TerminalHeadlessHarness.checkSwitchingToEmptyWindowKeepsMainPane()
+            try printJSON(result)
+        case "headless-check-main-window-reselection-regression":
+            let result = try TerminalHeadlessHarness.checkMainWindowReselectionRegression()
+            try printJSON(result)
         case "debug-terminal-ancestry":
             let appURL = URL(fileURLWithPath: CommandLine.arguments[0])
                 .deletingLastPathComponent()
@@ -252,5 +261,8 @@ private struct CLI {
       headless-send-terminal-eot
       headless-select-preview-file --selected-file PATH
       headless-select-diff-file --selected-file PATH
+      headless-check-session-window-semantics
+      headless-check-empty-window-switch
+      headless-check-main-window-reselection-regression
     """
 }

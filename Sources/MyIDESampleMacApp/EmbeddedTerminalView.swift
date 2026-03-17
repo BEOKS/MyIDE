@@ -35,6 +35,7 @@ final class EmbeddedTerminalView: LocalProcessTerminalView {
     let paneID: String
     private let configuration: TerminalPaneConfiguration
     private let onProcessTerminated: () -> Void
+    private let lifecycleController = TerminalPaneLifecycleController()
     private lazy var terminalProcessDelegate = EmbeddedTerminalProcessDelegate { [weak self] exitCode in
         self?.handleProcessTermination(exitCode: exitCode)
     }
@@ -60,11 +61,21 @@ final class EmbeddedTerminalView: LocalProcessTerminalView {
         nil
     }
 
-    deinit {
-        terminate()
-        Task { @MainActor in
-            TerminalAutomationBridge.shared.unregisterTerminal(paneID: self.paneID)
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil {
+            prepareForTearDown()
         }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    override func removeFromSuperview() {
+        prepareForTearDown()
+        super.removeFromSuperview()
+    }
+
+    deinit {
+        prepareForTearDown()
+        terminate()
     }
 
     override func viewDidMoveToWindow() {
@@ -88,8 +99,31 @@ final class EmbeddedTerminalView: LocalProcessTerminalView {
         String(decoding: getTerminal().getBufferAsData(), as: UTF8.self)
     }
 
+    private func prepareForTearDown() {
+        lifecycleController.beginTearDown()
+        unregisterTerminal()
+    }
+
+    private func unregisterTerminal() {
+        let terminalPaneID = paneID
+        if Thread.isMainThread {
+            MainActor.assumeIsolated {
+                TerminalAutomationBridge.shared.unregisterTerminal(paneID: terminalPaneID)
+            }
+            return
+        }
+
+        DispatchQueue.main.async {
+            TerminalAutomationBridge.shared.unregisterTerminal(paneID: terminalPaneID)
+        }
+    }
+
     private func handleProcessTermination(exitCode: Int32?) {
         _ = exitCode
+        guard lifecycleController.shouldPropagateProcessTermination() else {
+            return
+        }
+
         guard !hasHandledProcessTermination else {
             return
         }
@@ -126,12 +160,14 @@ final class EmbeddedTerminalView: LocalProcessTerminalView {
         }
 
         hasStartedProcess = true
-        let shell = currentUserShell()
-        let shellIdiom = "-" + URL(fileURLWithPath: shell).lastPathComponent
+        let launchPlan = TerminalProviderRuntime.launchPlan(
+            for: configuration.provider,
+            shellPath: currentUserShell()
+        )
         startProcess(
-            executable: shell,
-            environment: terminalEnvironment(),
-            execName: shellIdiom,
+            executable: launchPlan.shellPath,
+            environment: launchPlan.environment,
+            execName: launchPlan.execName,
             currentDirectory: configuration.workingDirectory
         )
     }
@@ -152,12 +188,5 @@ final class EmbeddedTerminalView: LocalProcessTerminalView {
         }
 
         return String(cString: pwd.pw_shell)
-    }
-
-    private func terminalEnvironment() -> [String] {
-        var values = Terminal.getEnvironmentVariables(termName: "xterm-256color")
-        values.append("TERM_PROGRAM=MyIDE")
-        values.append("COLORTERM=truecolor")
-        return values
     }
 }

@@ -205,6 +205,18 @@ When('I headless-select diff file {string} through the file picker', function (f
   )
 })
 
+When('I headless-check session and window semantics', function () {
+  this.windowSemantics = this.runCliJson('headless-check-session-window-semantics')
+})
+
+When('I headless-check switching from an empty window back to Main', function () {
+  this.windowSemantics = this.runCliJson('headless-check-empty-window-switch')
+})
+
+When('I headless-check the Main window reselection regression', function () {
+  this.windowSemantics = this.runCliJson('headless-check-main-window-reselection-regression')
+})
+
 Then('the workspace should have {int} session', function (count) {
   const workspace = this.runCliJson('show', '--workspace', this.workspacePath)
   assert.equal(workspace.sessions.length, count)
@@ -310,4 +322,45 @@ Then('terminal pane should close', function () {
 
 Then('selected file path should equal {string}', function (fileName) {
   assert.equal(this.terminalInteraction.selectedPath, resolveFixturePath(this, fileName))
+})
+
+Then('the first session should map to {int} app window', function (count) {
+  assert.equal(this.windowSemantics.appWindowCountAfterFirstSession, count)
+})
+
+Then('the first session should start with {int} LNB windows', function (count) {
+  assert.equal(this.windowSemantics.sidebarWindowCountAfterFirstSession, count)
+})
+
+Then('adding a window should make the first session show {int} LNB windows', function (count) {
+  assert.equal(this.windowSemantics.sidebarWindowCountAfterAddingWindow, count)
+})
+
+Then('the first session LNB should include window title {string}', function (title) {
+  assert.ok(this.windowSemantics.sidebarWindowTitlesForFirstSession.includes(title))
+})
+
+Then('the second session should map to {int} app windows', function (count) {
+  assert.equal(this.windowSemantics.appWindowCountAfterSecondSession, count)
+})
+
+Then('the second session should start with {int} LNB windows', function (count) {
+  assert.equal(this.windowSemantics.sidebarWindowCountForSecondSession, count)
+})
+
+Then('the Main window should keep {int} panes after returning', function (count) {
+  assert.equal(this.windowSemantics.mainPaneCountAfterReturn, count)
+})
+
+Then('switching back to Main should not raise an error', function () {
+  assert.equal(this.windowSemantics.canReturnToMainWithoutError, true)
+})
+
+Then('the scratch window should keep {int} panes', function (count) {
+  assert.equal(this.windowSemantics.scratchPaneCount, count)
+})
+
+Then('the Main window should preserve pane titles:', function (table) {
+  const expected = table.raw().flat()
+  assert.deepEqual(this.windowSemantics.mainPaneTitlesAfterReturn, expected)
 })
