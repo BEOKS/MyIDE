@@ -54,6 +54,18 @@ public struct FilePickerTestResult: Codable, Sendable {
     }
 }
 
+public struct PaneDividerDragAutomationResult: Codable, Sendable {
+    public var initialRatio: Double
+    public var finalRatio: Double
+    public var debugLog: String
+
+    public init(initialRatio: Double, finalRatio: Double, debugLog: String) {
+        self.initialRatio = initialRatio
+        self.finalRatio = finalRatio
+        self.debugLog = debugLog
+    }
+}
+
 public struct AccessibilityNodeSnapshot: Codable, Sendable {
     public var identifier: String?
     public var role: String?
@@ -105,9 +117,11 @@ public enum TerminalUIAutomation {
         terminateExistingAppInstances()
         let workspaceURL = temporaryWorkspaceURL()
         let automationDirectory = temporaryAutomationDirectory()
+        let debugLogURL = FileManager.default.temporaryDirectory.appendingPathComponent("myide-divider-debug-\(UUID().uuidString).log")
         defer {
             cleanupTemporaryWorkspace(at: workspaceURL)
             cleanupTemporaryDirectory(at: automationDirectory)
+            try? FileManager.default.removeItem(at: debugLogURL)
         }
 
         let process = Process()
@@ -171,14 +185,20 @@ public enum TerminalUIAutomation {
         terminateExistingAppInstances()
         let workspaceURL = temporaryWorkspaceURL()
         let automationDirectory = temporaryAutomationDirectory()
+        let debugLogURL = FileManager.default.temporaryDirectory.appendingPathComponent("myide-divider-debug-\(UUID().uuidString).log")
         defer {
             cleanupTemporaryWorkspace(at: workspaceURL)
             cleanupTemporaryDirectory(at: automationDirectory)
+            try? FileManager.default.removeItem(at: debugLogURL)
         }
 
         let process = Process()
         process.executableURL = appExecutableURL
-        process.environment = mergedEnvironment(with: workspaceURL, automationDirectory: automationDirectory)
+        process.environment = mergedEnvironment(
+            with: workspaceURL,
+            automationDirectory: automationDirectory,
+            extra: ["MYIDE_DIVIDER_DEBUG_LOG": debugLogURL.path]
+        )
 
         try process.run()
         defer {
@@ -234,14 +254,20 @@ public enum TerminalUIAutomation {
         terminateExistingAppInstances()
         let workspaceURL = temporaryWorkspaceURL()
         let automationDirectory = temporaryAutomationDirectory()
+        let debugLogURL = FileManager.default.temporaryDirectory.appendingPathComponent("myide-divider-debug-\(UUID().uuidString).log")
         defer {
             cleanupTemporaryWorkspace(at: workspaceURL)
             cleanupTemporaryDirectory(at: automationDirectory)
+            try? FileManager.default.removeItem(at: debugLogURL)
         }
 
         let process = Process()
         process.executableURL = appExecutableURL
-        process.environment = mergedEnvironment(with: workspaceURL, automationDirectory: automationDirectory)
+        process.environment = mergedEnvironment(
+            with: workspaceURL,
+            automationDirectory: automationDirectory,
+            extra: ["MYIDE_DIVIDER_DEBUG_LOG": debugLogURL.path]
+        )
         try process.run()
         defer {
             if process.isRunning {
@@ -291,14 +317,20 @@ public enum TerminalUIAutomation {
         terminateExistingAppInstances()
         let workspaceURL = temporaryWorkspaceURL()
         let automationDirectory = temporaryAutomationDirectory()
+        let debugLogURL = FileManager.default.temporaryDirectory.appendingPathComponent("myide-divider-debug-\(UUID().uuidString).log")
         defer {
             cleanupTemporaryWorkspace(at: workspaceURL)
             cleanupTemporaryDirectory(at: automationDirectory)
+            try? FileManager.default.removeItem(at: debugLogURL)
         }
 
         let process = Process()
         process.executableURL = appExecutableURL
-        process.environment = mergedEnvironment(with: workspaceURL, automationDirectory: automationDirectory)
+        process.environment = mergedEnvironment(
+            with: workspaceURL,
+            automationDirectory: automationDirectory,
+            extra: ["MYIDE_DIVIDER_DEBUG_LOG": debugLogURL.path]
+        )
         try process.run()
         defer {
             if process.isRunning {
@@ -338,14 +370,20 @@ public enum TerminalUIAutomation {
         terminateExistingAppInstances()
         let workspaceURL = temporaryWorkspaceURL()
         let automationDirectory = temporaryAutomationDirectory()
+        let debugLogURL = FileManager.default.temporaryDirectory.appendingPathComponent("myide-divider-debug-\(UUID().uuidString).log")
         defer {
             cleanupTemporaryWorkspace(at: workspaceURL)
             cleanupTemporaryDirectory(at: automationDirectory)
+            try? FileManager.default.removeItem(at: debugLogURL)
         }
 
         let process = Process()
         process.executableURL = appExecutableURL
-        process.environment = mergedEnvironment(with: workspaceURL, automationDirectory: automationDirectory)
+        process.environment = mergedEnvironment(
+            with: workspaceURL,
+            automationDirectory: automationDirectory,
+            extra: ["MYIDE_DIVIDER_DEBUG_LOG": debugLogURL.path]
+        )
         try process.run()
         defer {
             if process.isRunning {
@@ -453,6 +491,70 @@ public enum TerminalUIAutomation {
         }
 
         return ancestry(of: surfaceElement)
+    }
+
+    public static func runPaneDividerDragTest(appExecutableURL: URL) throws -> PaneDividerDragAutomationResult {
+        guard AXIsProcessTrusted() else {
+            throw TerminalUITestError.accessibilityUnavailable
+        }
+
+        terminateExistingAppInstances()
+        let workspaceURL = temporaryWorkspaceURL()
+        let automationDirectory = temporaryAutomationDirectory()
+        let debugLogURL = FileManager.default.temporaryDirectory.appendingPathComponent("myide-divider-debug-\(UUID().uuidString).log")
+        defer {
+            cleanupTemporaryWorkspace(at: workspaceURL)
+            cleanupTemporaryDirectory(at: automationDirectory)
+            try? FileManager.default.removeItem(at: debugLogURL)
+        }
+
+        let fixture = workspaceForRootVerticalSplit()
+        try WorkspaceStore.save(fixture.workspace, to: workspaceURL)
+
+        let process = Process()
+        process.executableURL = appExecutableURL
+        process.environment = mergedEnvironment(
+            with: workspaceURL,
+            automationDirectory: automationDirectory,
+            extra: ["MYIDE_DIVIDER_DEBUG_LOG": debugLogURL.path]
+        )
+        try process.run()
+        defer {
+            if process.isRunning {
+                process.terminate()
+                process.waitUntilExit()
+            }
+        }
+
+        guard let app = waitForRunningApplication(pid: process.processIdentifier) else {
+            throw TerminalUITestError.appLaunchFailed
+        }
+
+        app.activate(options: [.activateAllWindows])
+        waitFor(seconds: 1)
+
+        let appElement = AXUIElementCreateApplication(process.processIdentifier)
+        guard let windowElement = waitForWindow(in: appElement) else {
+            throw TerminalUITestError.appWindowNotFound
+        }
+
+        guard let dividerElement = waitForElement(identifier: "pane-divider-root", in: windowElement) else {
+            throw TerminalUITestError.surfaceNotFound
+        }
+
+        let dividerFrame = try frame(of: dividerElement)
+        let startPoint = CGPoint(x: dividerFrame.midX, y: dividerFrame.midY)
+        let endPoint = CGPoint(x: startPoint.x - 120, y: startPoint.y)
+        drag(from: startPoint, to: endPoint)
+
+        let finalRatio = try waitForUpdatedRootRatio(
+            workspaceURL: workspaceURL,
+            sessionID: fixture.sessionID,
+            windowID: fixture.windowID
+        )
+
+        let debugLog = (try? String(contentsOf: debugLogURL, encoding: .utf8)) ?? ""
+        return PaneDividerDragAutomationResult(initialRatio: 0.5, finalRatio: finalRatio, debugLog: debugLog)
     }
 
     private static func terminateExistingAppInstances() {
@@ -672,6 +774,36 @@ public enum TerminalUIAutomation {
         up?.post(tap: .cghidEventTap)
     }
 
+    private static func drag(from start: CGPoint, to end: CGPoint, steps: Int = 12) {
+        guard let source = CGEventSource(stateID: .hidSystemState) else {
+            return
+        }
+
+        let down = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: start, mouseButton: .left)
+        down?.post(tap: .cghidEventTap)
+        waitFor(seconds: 0.05)
+
+        for step in 1...max(steps, 1) {
+            let progress = CGFloat(step) / CGFloat(max(steps, 1))
+            let point = CGPoint(
+                x: start.x + (end.x - start.x) * progress,
+                y: start.y + (end.y - start.y) * progress
+            )
+            let event = CGEvent(
+                mouseEventSource: source,
+                mouseType: .leftMouseDragged,
+                mouseCursorPosition: point,
+                mouseButton: .left
+            )
+            event?.post(tap: .cghidEventTap)
+            waitFor(seconds: 0.02)
+        }
+
+        let up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: end, mouseButton: .left)
+        up?.post(tap: .cghidEventTap)
+        waitFor(seconds: 0.1)
+    }
+
     private static func sendShortcut(keyCode: CGKeyCode, flags: CGEventFlags) {
         let source = CGEventSource(stateID: .hidSystemState)
         let down = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true)
@@ -775,6 +907,48 @@ public enum TerminalUIAutomation {
         let window = WorkspaceWindow(title: "Main", panes: [pane])
         let session = WorkspaceSession(name: "Main Session", windows: [window])
         return Workspace(sessions: [session])
+    }
+
+    private static func workspaceForRootVerticalSplit() -> (workspace: Workspace, sessionID: String, windowID: String) {
+        let cwd = FileManager.default.currentDirectoryPath
+        let leftPane = WorkspacePane.terminal(title: "Left", provider: .terminal, workingDirectory: cwd)
+        let rightPane = WorkspacePane.terminal(title: "Right", provider: .terminal, workingDirectory: cwd)
+        let window = WorkspaceWindow(
+            title: "Main",
+            panes: [leftPane, rightPane],
+            layout: .split(axis: .vertical, ratio: 0.5, primary: .leaf(leftPane.id), secondary: .leaf(rightPane.id))
+        )
+        let session = WorkspaceSession(name: "Main Session", windows: [window])
+        let workspace = Workspace(sessions: [session])
+        return (workspace, session.id, window.id)
+    }
+
+    private static func waitForUpdatedRootRatio(
+        workspaceURL: URL,
+        sessionID: String,
+        windowID: String
+    ) throws -> Double {
+        if let updatedRatio = waitUntil(timeout: 5, pollInterval: 0.2, body: { () -> Double? in
+            guard
+                let workspace = try? WorkspaceStore.load(from: workspaceURL),
+                let descriptor = try? workspace.splitDescriptor(
+                    sessionID: sessionID,
+                    windowID: windowID,
+                    splitPath: .root
+                ),
+                descriptor.ratio < 0.49
+            else {
+                return nil
+            }
+
+            return descriptor.ratio
+        }) {
+            return updatedRatio
+        }
+
+        let workspace = try WorkspaceStore.load(from: workspaceURL)
+        let descriptor = try workspace.splitDescriptor(sessionID: sessionID, windowID: windowID, splitPath: .root)
+        return descriptor.ratio
     }
 
     private static func runFilePickerTest(

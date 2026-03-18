@@ -8,7 +8,7 @@ public struct PaneSplitLayoutMetrics: Codable, Sendable, Equatable {
     public var dividerOffset: Double
 
     public init(totalExtent: Double, ratio: Double) {
-        let clampedRatio = min(max(ratio, 0), 1)
+        let clampedRatio = Self.clampedRatio(ratio)
         let safeTotalExtent = max(totalExtent, 0)
         let primaryExtent = safeTotalExtent * clampedRatio
         let secondaryExtent = max(safeTotalExtent - primaryExtent, 0)
@@ -16,6 +16,18 @@ public struct PaneSplitLayoutMetrics: Codable, Sendable, Equatable {
         self.primaryExtent = primaryExtent
         self.secondaryExtent = secondaryExtent
         self.dividerOffset = max(primaryExtent - Self.dividerThickness / 2, 0)
+    }
+
+    public static func clampedRatio(_ ratio: Double) -> Double {
+        min(max(ratio, 0), 1)
+    }
+
+    public static func ratio(forDividerLocation location: Double, totalExtent: Double) -> Double {
+        guard totalExtent > 0 else {
+            return 0.5
+        }
+
+        return clampedRatio(location / totalExtent)
     }
 }
 

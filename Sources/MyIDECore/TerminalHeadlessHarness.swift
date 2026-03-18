@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SwiftUI
 import SwiftTerm
 
 @MainActor
@@ -639,6 +640,239 @@ public enum TerminalHeadlessHarness {
         )
     }
 
+    public static func checkPaneDividerResizing() throws -> PaneDividerResizeResult {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("myide-divider-resize-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let workspaceURL = tempDir.appendingPathComponent("workspace.json")
+        let cwd = FileManager.default.currentDirectoryPath
+
+        var workspace = Workspace.empty()
+        let session = workspace.addSession(named: "Session 1")
+        let window = try workspace.addWindow(toSessionID: session.id, title: "Main")
+
+        let rootPane = WorkspacePane.terminal(title: "Root", provider: .terminal, workingDirectory: cwd)
+        try workspace.addPane(rootPane, toSessionID: session.id, windowID: window.id)
+
+        let rightPane = WorkspacePane.terminal(title: "Right", provider: .terminal, workingDirectory: cwd)
+        _ = try workspace.splitPane(
+            sessionID: session.id,
+            windowID: window.id,
+            paneID: rootPane.id,
+            axis: .vertical,
+            newPane: rightPane
+        )
+
+        let bottomRightPane = WorkspacePane.terminal(title: "BottomRight", provider: .terminal, workingDirectory: cwd)
+        _ = try workspace.splitPane(
+            sessionID: session.id,
+            windowID: window.id,
+            paneID: rightPane.id,
+            axis: .horizontal,
+            newPane: bottomRightPane
+        )
+
+        let rootPath = PaneLayoutPath.root
+        let nestedPath = PaneLayoutPath.root.appending(.secondary)
+
+        let verticalRatio = PaneSplitLayoutMetrics.ratio(forDividerLocation: 260, totalExtent: 400)
+        let horizontalRatio = PaneSplitLayoutMetrics.ratio(forDividerLocation: 225, totalExtent: 300)
+
+        _ = try workspace.updateSplitRatio(
+            sessionID: session.id,
+            windowID: window.id,
+            splitPath: rootPath,
+            ratio: verticalRatio
+        )
+        _ = try workspace.updateSplitRatio(
+            sessionID: session.id,
+            windowID: window.id,
+            splitPath: nestedPath,
+            ratio: horizontalRatio
+        )
+
+        let verticalMetrics = PaneSplitLayoutMetrics(
+            totalExtent: 400,
+            ratio: try workspace.splitDescriptor(
+                sessionID: session.id,
+                windowID: window.id,
+                splitPath: rootPath
+            ).ratio
+        )
+        let horizontalMetrics = PaneSplitLayoutMetrics(
+            totalExtent: 300,
+            ratio: try workspace.splitDescriptor(
+                sessionID: session.id,
+                windowID: window.id,
+                splitPath: nestedPath
+            ).ratio
+        )
+
+        try WorkspaceStore.save(workspace, to: workspaceURL)
+        let reloadedWorkspace = try WorkspaceStore.load(from: workspaceURL)
+        let reloadedSplits = try reloadedWorkspace.splitDescriptors(sessionID: session.id, windowID: window.id)
+
+        return PaneDividerResizeResult(
+            verticalRatio: verticalRatio,
+            verticalPrimaryExtent: verticalMetrics.primaryExtent,
+            verticalSecondaryExtent: verticalMetrics.secondaryExtent,
+            horizontalRatio: horizontalRatio,
+            horizontalPrimaryExtent: horizontalMetrics.primaryExtent,
+            horizontalSecondaryExtent: horizontalMetrics.secondaryExtent,
+            reloadedSplits: reloadedSplits
+        )
+    }
+
+    public static func checkSplitDividerHitTesting() -> SplitDividerHitTestingResult {
+        let horizontal = InteractivePaneSplitContainerView(
+            axis: .horizontal,
+            ratio: 0.5,
+            primary: Color.red,
+            secondary: Color.blue
+        )
+        horizontal.frame = CGRect(x: 0, y: 0, width: 200, height: 200)
+        horizontal.layoutSubtreeIfNeeded()
+
+        let vertical = InteractivePaneSplitContainerView(
+            axis: .vertical,
+            ratio: 0.5,
+            primary: Color.red,
+            secondary: Color.blue
+        )
+        vertical.frame = CGRect(x: 0, y: 0, width: 200, height: 200)
+        vertical.layoutSubtreeIfNeeded()
+
+        return SplitDividerHitTestingResult(
+            horizontalTopPointHitsDivider: horizontal.hitTestReturnsDivider(at: CGPoint(x: 100, y: 10)),
+            horizontalDividerPointHitsDivider: horizontal.hitTestReturnsDivider(at: CGPoint(x: 100, y: 100)),
+            verticalLeftPointHitsDivider: vertical.hitTestReturnsDivider(at: CGPoint(x: 10, y: 100)),
+            verticalDividerPointHitsDivider: vertical.hitTestReturnsDivider(at: CGPoint(x: 100, y: 100))
+        )
+    }
+
+    public static func checkNestedSplitResizeIsolation() throws -> NestedSplitResizeIsolationResult {
+        let cwd = FileManager.default.currentDirectoryPath
+        var workspace = Workspace.empty()
+        let session = workspace.addSession(named: "Session 1")
+        let window = try workspace.addWindow(toSessionID: session.id, title: "Main")
+
+        let topLeft = WorkspacePane.terminal(title: "TopLeft", provider: .terminal, workingDirectory: cwd)
+        try workspace.addPane(topLeft, toSessionID: session.id, windowID: window.id)
+
+        let bottomLeft = WorkspacePane.terminal(title: "BottomLeft", provider: .terminal, workingDirectory: cwd)
+        _ = try workspace.splitPane(
+            sessionID: session.id,
+            windowID: window.id,
+            paneID: topLeft.id,
+            axis: .horizontal,
+            newPane: bottomLeft
+        )
+
+        let topRight = WorkspacePane.terminal(title: "TopRight", provider: .terminal, workingDirectory: cwd)
+        _ = try workspace.splitPane(
+            sessionID: session.id,
+            windowID: window.id,
+            paneID: topLeft.id,
+            axis: .vertical,
+            newPane: topRight
+        )
+
+        let bottomRight = WorkspacePane.terminal(title: "BottomRight", provider: .terminal, workingDirectory: cwd)
+        _ = try workspace.splitPane(
+            sessionID: session.id,
+            windowID: window.id,
+            paneID: bottomLeft.id,
+            axis: .vertical,
+            newPane: bottomRight
+        )
+
+        let rootPath = PaneLayoutPath.root
+        let topSplitPath = PaneLayoutPath.root.appending(.primary)
+        let bottomSplitPath = PaneLayoutPath.root.appending(.secondary)
+
+        _ = try workspace.updateSplitRatio(
+            sessionID: session.id,
+            windowID: window.id,
+            splitPath: rootPath,
+            ratio: 0.25
+        )
+
+        let topHeightMetrics = PaneSplitLayoutMetrics(
+            totalExtent: 400,
+            ratio: try workspace.splitDescriptor(
+                sessionID: session.id,
+                windowID: window.id,
+                splitPath: rootPath
+            ).ratio
+        )
+
+        let topWidthBefore = PaneSplitLayoutMetrics(
+            totalExtent: 200,
+            ratio: try workspace.splitDescriptor(
+                sessionID: session.id,
+                windowID: window.id,
+                splitPath: topSplitPath
+            ).ratio
+        )
+        let bottomWidthBefore = PaneSplitLayoutMetrics(
+            totalExtent: 200,
+            ratio: try workspace.splitDescriptor(
+                sessionID: session.id,
+                windowID: window.id,
+                splitPath: bottomSplitPath
+            ).ratio
+        )
+
+        _ = try workspace.updateSplitRatio(
+            sessionID: session.id,
+            windowID: window.id,
+            splitPath: topSplitPath,
+            ratio: 0.25
+        )
+
+        let topWidthAfter = PaneSplitLayoutMetrics(
+            totalExtent: 200,
+            ratio: try workspace.splitDescriptor(
+                sessionID: session.id,
+                windowID: window.id,
+                splitPath: topSplitPath
+            ).ratio
+        )
+        let bottomWidthAfter = PaneSplitLayoutMetrics(
+            totalExtent: 200,
+            ratio: try workspace.splitDescriptor(
+                sessionID: session.id,
+                windowID: window.id,
+                splitPath: bottomSplitPath
+            ).ratio
+        )
+
+        return NestedSplitResizeIsolationResult(
+            rootRatioAfterHeightResize: try workspace.splitDescriptor(
+                sessionID: session.id,
+                windowID: window.id,
+                splitPath: rootPath
+            ).ratio,
+            topHeightAfterHeightResize: topHeightMetrics.primaryExtent,
+            bottomHeightAfterHeightResize: topHeightMetrics.secondaryExtent,
+            topWidthBeforeIndependentResize: topWidthBefore.primaryExtent,
+            topWidthSiblingBeforeIndependentResize: topWidthBefore.secondaryExtent,
+            bottomWidthBeforeIndependentResize: bottomWidthBefore.primaryExtent,
+            bottomWidthSiblingBeforeIndependentResize: bottomWidthBefore.secondaryExtent,
+            topWidthAfterIndependentResize: topWidthAfter.primaryExtent,
+            topWidthSiblingAfterIndependentResize: topWidthAfter.secondaryExtent,
+            bottomWidthAfterIndependentResize: bottomWidthAfter.primaryExtent,
+            bottomWidthSiblingAfterIndependentResize: bottomWidthAfter.secondaryExtent,
+            bottomSplitRatioAfterTopResize: try workspace.splitDescriptor(
+                sessionID: session.id,
+                windowID: window.id,
+                splitPath: bottomSplitPath
+            ).ratio
+        )
+    }
+
     public static func checkCLIWorkspaceSync() throws -> CLIWorkspaceSyncResult {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("myide-sync-test-\(UUID().uuidString)")
@@ -1149,5 +1383,95 @@ public struct SplitPresentationSizingResult: Codable, Sendable {
         self.horizontalSecondaryExtent = horizontalSecondaryExtent
         self.compactPickerColumnCount = compactPickerColumnCount
         self.compactPickerRequiresScrolling = compactPickerRequiresScrolling
+    }
+}
+
+public struct PaneDividerResizeResult: Codable, Sendable {
+    public var verticalRatio: Double
+    public var verticalPrimaryExtent: Double
+    public var verticalSecondaryExtent: Double
+    public var horizontalRatio: Double
+    public var horizontalPrimaryExtent: Double
+    public var horizontalSecondaryExtent: Double
+    public var reloadedSplits: [PaneSplitDescriptor]
+
+    public init(
+        verticalRatio: Double,
+        verticalPrimaryExtent: Double,
+        verticalSecondaryExtent: Double,
+        horizontalRatio: Double,
+        horizontalPrimaryExtent: Double,
+        horizontalSecondaryExtent: Double,
+        reloadedSplits: [PaneSplitDescriptor]
+    ) {
+        self.verticalRatio = verticalRatio
+        self.verticalPrimaryExtent = verticalPrimaryExtent
+        self.verticalSecondaryExtent = verticalSecondaryExtent
+        self.horizontalRatio = horizontalRatio
+        self.horizontalPrimaryExtent = horizontalPrimaryExtent
+        self.horizontalSecondaryExtent = horizontalSecondaryExtent
+        self.reloadedSplits = reloadedSplits
+    }
+}
+
+public struct SplitDividerHitTestingResult: Codable, Sendable {
+    public var horizontalTopPointHitsDivider: Bool
+    public var horizontalDividerPointHitsDivider: Bool
+    public var verticalLeftPointHitsDivider: Bool
+    public var verticalDividerPointHitsDivider: Bool
+
+    public init(
+        horizontalTopPointHitsDivider: Bool,
+        horizontalDividerPointHitsDivider: Bool,
+        verticalLeftPointHitsDivider: Bool,
+        verticalDividerPointHitsDivider: Bool
+    ) {
+        self.horizontalTopPointHitsDivider = horizontalTopPointHitsDivider
+        self.horizontalDividerPointHitsDivider = horizontalDividerPointHitsDivider
+        self.verticalLeftPointHitsDivider = verticalLeftPointHitsDivider
+        self.verticalDividerPointHitsDivider = verticalDividerPointHitsDivider
+    }
+}
+
+public struct NestedSplitResizeIsolationResult: Codable, Sendable {
+    public var rootRatioAfterHeightResize: Double
+    public var topHeightAfterHeightResize: Double
+    public var bottomHeightAfterHeightResize: Double
+    public var topWidthBeforeIndependentResize: Double
+    public var topWidthSiblingBeforeIndependentResize: Double
+    public var bottomWidthBeforeIndependentResize: Double
+    public var bottomWidthSiblingBeforeIndependentResize: Double
+    public var topWidthAfterIndependentResize: Double
+    public var topWidthSiblingAfterIndependentResize: Double
+    public var bottomWidthAfterIndependentResize: Double
+    public var bottomWidthSiblingAfterIndependentResize: Double
+    public var bottomSplitRatioAfterTopResize: Double
+
+    public init(
+        rootRatioAfterHeightResize: Double,
+        topHeightAfterHeightResize: Double,
+        bottomHeightAfterHeightResize: Double,
+        topWidthBeforeIndependentResize: Double,
+        topWidthSiblingBeforeIndependentResize: Double,
+        bottomWidthBeforeIndependentResize: Double,
+        bottomWidthSiblingBeforeIndependentResize: Double,
+        topWidthAfterIndependentResize: Double,
+        topWidthSiblingAfterIndependentResize: Double,
+        bottomWidthAfterIndependentResize: Double,
+        bottomWidthSiblingAfterIndependentResize: Double,
+        bottomSplitRatioAfterTopResize: Double
+    ) {
+        self.rootRatioAfterHeightResize = rootRatioAfterHeightResize
+        self.topHeightAfterHeightResize = topHeightAfterHeightResize
+        self.bottomHeightAfterHeightResize = bottomHeightAfterHeightResize
+        self.topWidthBeforeIndependentResize = topWidthBeforeIndependentResize
+        self.topWidthSiblingBeforeIndependentResize = topWidthSiblingBeforeIndependentResize
+        self.bottomWidthBeforeIndependentResize = bottomWidthBeforeIndependentResize
+        self.bottomWidthSiblingBeforeIndependentResize = bottomWidthSiblingBeforeIndependentResize
+        self.topWidthAfterIndependentResize = topWidthAfterIndependentResize
+        self.topWidthSiblingAfterIndependentResize = topWidthSiblingAfterIndependentResize
+        self.bottomWidthAfterIndependentResize = bottomWidthAfterIndependentResize
+        self.bottomWidthSiblingAfterIndependentResize = bottomWidthSiblingAfterIndependentResize
+        self.bottomSplitRatioAfterTopResize = bottomSplitRatioAfterTopResize
     }
 }

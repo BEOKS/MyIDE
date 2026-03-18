@@ -22,6 +22,16 @@ function normalizeTerminalCommand(command) {
     .replace(/\n/g, '\\n')
 }
 
+function assertRatio(actual, expected) {
+  assert.ok(Math.abs(actual - expected) < 0.0001, `Expected ratio ${expected} but got ${actual}`)
+}
+
+function findSplitDescriptor(splits, path) {
+  const descriptor = splits.find((item) => item.path === path)
+  assert.ok(descriptor, `Expected split at path "${path}" but got ${JSON.stringify(splits, null, 2)}`)
+  return descriptor
+}
+
 Given('a fresh workspace', function () {
   this.runCli('init', '--workspace', this.workspacePath)
 })
@@ -66,6 +76,20 @@ When('I add a terminal pane titled {string} using provider {string} to the curre
     '--workspace', this.workspacePath,
     '--session-id', this.currentSession.id,
     '--window-id', this.currentWindow.id,
+    '--kind', 'terminal',
+    '--title', title,
+    '--provider', provider
+  )
+})
+
+When('I split the current pane along the {string} axis into a terminal pane titled {string} using provider {string}', function (axis, title, provider) {
+  this.currentPane = this.runCliJson(
+    'split-pane',
+    '--workspace', this.workspacePath,
+    '--session-id', this.currentSession.id,
+    '--window-id', this.currentWindow.id,
+    '--pane-id', this.currentPane.id,
+    '--axis', axis,
     '--kind', 'terminal',
     '--title', title,
     '--provider', provider
@@ -594,12 +618,54 @@ When('I headless-check split presentation sizing', function () {
   this.splitPresentationResult = this.runCliJson('headless-check-split-presentation-sizing')
 })
 
+When('I headless-check pane divider resizing', function () {
+  this.dividerResizeResult = this.runCliJson('headless-check-pane-divider-resizing')
+})
+
+When('I headless-check split divider hit testing', function () {
+  this.dividerResizeResult = this.runCliJson('headless-check-split-divider-hit-testing')
+})
+
+When('I headless-check nested split resize isolation', function () {
+  this.dividerResizeResult = this.runCliJson('headless-check-nested-split-resize-isolation')
+})
+
+When('I list splits in the current window', function () {
+  this.currentSplits = this.runCliJson(
+    'list-splits',
+    '--workspace', this.workspacePath,
+    '--session-id', this.currentSession.id,
+    '--window-id', this.currentWindow.id
+  )
+})
+
+When('I update the split at path {string} to ratio {float}', function (path, ratio) {
+  this.currentSplit = this.runCliJson(
+    'update-split',
+    '--workspace', this.workspacePath,
+    '--session-id', this.currentSession.id,
+    '--window-id', this.currentWindow.id,
+    '--split-path', path,
+    '--ratio', String(ratio)
+  )
+})
+
 Then('the split should produce {int} panes', function (count) {
   assert.equal(this.splitRemoveResult.paneCountAfterSplit, count)
 })
 
 Then('the split ratio should be {float}', function (ratio) {
   assert.equal(this.splitRemoveResult.splitRatio, ratio)
+})
+
+Then('the current window should have {int} splits', function (count) {
+  assert.equal(this.currentSplits.length, count)
+})
+
+Then('the split at path {string} should have axis {string} and ratio {float}', function (path, axis, ratio) {
+  const descriptor = findSplitDescriptor(this.currentSplits, path)
+  assert.equal(descriptor.axis, axis)
+  assertRatio(descriptor.ratio, ratio)
 })
 
 Then('a 200-point vertical split should produce pane extents of {int} and {int}', function (first, second) {
@@ -610,6 +676,72 @@ Then('a 200-point vertical split should produce pane extents of {int} and {int}'
 Then('a 300-point horizontal split should produce pane extents of {int} and {int}', function (first, second) {
   assert.equal(this.splitPresentationResult.horizontalPrimaryExtent, first)
   assert.equal(this.splitPresentationResult.horizontalSecondaryExtent, second)
+})
+
+Then('dragging a 400-point vertical divider to 260 should store ratio {float}', function (ratio) {
+  assertRatio(this.dividerResizeResult.verticalRatio, ratio)
+})
+
+Then('the resized vertical split should produce pane extents of {int} and {int}', function (first, second) {
+  assert.equal(this.dividerResizeResult.verticalPrimaryExtent, first)
+  assert.equal(this.dividerResizeResult.verticalSecondaryExtent, second)
+})
+
+Then('dragging a 300-point horizontal divider to 225 should store ratio {float}', function (ratio) {
+  assertRatio(this.dividerResizeResult.horizontalRatio, ratio)
+})
+
+Then('the resized horizontal split should produce pane extents of {int} and {int}', function (first, second) {
+  assert.equal(this.dividerResizeResult.horizontalPrimaryExtent, first)
+  assert.equal(this.dividerResizeResult.horizontalSecondaryExtent, second)
+})
+
+Then('reloading the workspace should keep a {string} split at {string} with ratio {float}', function (axis, path, ratio) {
+  const descriptor = findSplitDescriptor(this.dividerResizeResult.reloadedSplits, path)
+  assert.equal(descriptor.axis, axis)
+  assertRatio(descriptor.ratio, ratio)
+})
+
+Then('dragging the horizontal divider up should make the top and bottom heights {int} and {int}', function (top, bottom) {
+  assert.equal(this.dividerResizeResult.topHeightAfterHeightResize, top)
+  assert.equal(this.dividerResizeResult.bottomHeightAfterHeightResize, bottom)
+})
+
+Then('before resizing the top vertical divider both top and bottom rows should keep widths {int} and {int}', function (left, right) {
+  assert.equal(this.dividerResizeResult.topWidthBeforeIndependentResize, left)
+  assert.equal(this.dividerResizeResult.topWidthSiblingBeforeIndependentResize, right)
+  assert.equal(this.dividerResizeResult.bottomWidthBeforeIndependentResize, left)
+  assert.equal(this.dividerResizeResult.bottomWidthSiblingBeforeIndependentResize, right)
+})
+
+Then('dragging only the top vertical divider left should make the top row widths {int} and {int}', function (left, right) {
+  assert.equal(this.dividerResizeResult.topWidthAfterIndependentResize, left)
+  assert.equal(this.dividerResizeResult.topWidthSiblingAfterIndependentResize, right)
+})
+
+Then('dragging only the top vertical divider left should keep the bottom row widths {int} and {int}', function (left, right) {
+  assert.equal(this.dividerResizeResult.bottomWidthAfterIndependentResize, left)
+  assert.equal(this.dividerResizeResult.bottomWidthSiblingAfterIndependentResize, right)
+})
+
+Then('dragging only the top vertical divider should keep the bottom split ratio {float}', function (ratio) {
+  assertRatio(this.dividerResizeResult.bottomSplitRatioAfterTopResize, ratio)
+})
+
+Then('a point near the top edge of a horizontal split should not hit the divider', function () {
+  assert.equal(this.dividerResizeResult.horizontalTopPointHitsDivider, false)
+})
+
+Then('a point on the horizontal divider should hit the divider', function () {
+  assert.equal(this.dividerResizeResult.horizontalDividerPointHitsDivider, true)
+})
+
+Then('a point near the left edge of a vertical split should not hit the divider', function () {
+  assert.equal(this.dividerResizeResult.verticalLeftPointHitsDivider, false)
+})
+
+Then('a point on the vertical divider should hit the divider', function () {
+  assert.equal(this.dividerResizeResult.verticalDividerPointHitsDivider, true)
 })
 
 Then('the compact picker should collapse to {int} column', function (count) {
@@ -715,4 +847,8 @@ Then('the nested split root ratio should be {float}', function (ratio) {
 
 Then('the nested split child ratio should be {float}', function (ratio) {
   assert.equal(this.nestedSplitResult.nestedRatio, ratio)
+})
+
+Then('the shown window layout root ratio should be {float}', function (ratio) {
+  assertRatio(this.currentWindow.layout.ratio, ratio)
 })

@@ -10,9 +10,11 @@ private final class EmbeddedTerminalProcessDelegate: LocalProcessTerminalViewDel
     }
 
     func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {
-        _ = source
         _ = newCols
         _ = newRows
+        let terminal = source.getTerminal()
+        terminal.refresh(startRow: 0, endRow: terminal.rows)
+        source.setNeedsDisplay(source.bounds)
     }
 
     func setTerminalTitle(source: LocalProcessTerminalView, title: String) {
@@ -42,6 +44,7 @@ final class EmbeddedTerminalView: LocalProcessTerminalView {
     }
     private var hasStartedProcess = false
     private var hasHandledProcessTermination = false
+    private var pendingResizeRefreshWorkItem: DispatchWorkItem?
 
     init(paneID: String, configuration: TerminalPaneConfiguration, onProcessTerminated: @escaping () -> Void) {
         self.paneID = paneID
@@ -75,6 +78,7 @@ final class EmbeddedTerminalView: LocalProcessTerminalView {
     }
 
     deinit {
+        pendingResizeRefreshWorkItem?.cancel()
         prepareForTearDown()
         terminate()
     }
@@ -87,6 +91,17 @@ final class EmbeddedTerminalView: LocalProcessTerminalView {
 
         TerminalAutomationBridge.shared.registerTerminal(self)
         startIfNeeded()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        let previousSize = frame.size
+        super.setFrameSize(newSize)
+
+        guard previousSize != newSize else {
+            return
+        }
+
+        scheduleResizeRefresh()
     }
 
     override func insertText(_ string: Any, replacementRange: NSRange) {
@@ -211,6 +226,7 @@ final class EmbeddedTerminalView: LocalProcessTerminalView {
             execName: launchPlan.execName,
             currentDirectory: configuration.workingDirectory
         )
+        scheduleResizeRefresh()
     }
 
     private func currentUserShell() -> String {
@@ -229,5 +245,28 @@ final class EmbeddedTerminalView: LocalProcessTerminalView {
         }
 
         return String(cString: pwd.pw_shell)
+    }
+
+    private func scheduleResizeRefresh() {
+        guard hasStartedProcess, bounds.width > 0, bounds.height > 0 else {
+            return
+        }
+
+        let expectedSize = bounds.size
+        pendingResizeRefreshWorkItem?.cancel()
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self, self.bounds.size == expectedSize else {
+                return
+            }
+
+            let terminal = self.getTerminal()
+            terminal.refresh(startRow: 0, endRow: terminal.rows)
+            self.setNeedsDisplay(self.bounds)
+            self.displayIfNeeded()
+        }
+
+        pendingResizeRefreshWorkItem = workItem
+        DispatchQueue.main.async(execute: workItem)
     }
 }

@@ -28,3 +28,22 @@ Feature: CLI management
     Then the shown session should have 0 windows
     When I delete the current session
     Then the workspace should have 0 sessions
+
+  Scenario: Manage split ratios through the CLI
+    Given a fresh workspace
+    When I create a session named "Ops"
+    And I create a window named "Editor" in the current session
+    And I add a terminal pane titled "Shell" using provider "terminal" to the current window
+    And I split the current pane along the "vertical" axis into a terminal pane titled "Docs" using provider "terminal"
+    And I split the current pane along the "horizontal" axis into a terminal pane titled "Logs" using provider "terminal"
+    And I list splits in the current window
+    Then the current window should have 2 splits
+    And the split at path "root" should have axis "vertical" and ratio 0.5
+    And the split at path "root.secondary" should have axis "horizontal" and ratio 0.5
+    When I update the split at path "root" to ratio 0.65
+    And I update the split at path "root.secondary" to ratio 0.25
+    And I list splits in the current window
+    Then the split at path "root" should have axis "vertical" and ratio 0.65
+    And the split at path "root.secondary" should have axis "horizontal" and ratio 0.25
+    When I show the current window
+    Then the shown window layout root ratio should be 0.65

@@ -35,6 +35,66 @@ public enum PaneSplitAxis: String, Codable, Sendable {
     case horizontal
 }
 
+public enum PaneLayoutBranch: String, Codable, CaseIterable, Sendable {
+    case primary
+    case secondary
+}
+
+public struct PaneLayoutPath: Codable, Hashable, Sendable, Equatable, CustomStringConvertible {
+    public static let root = PaneLayoutPath()
+
+    public var components: [PaneLayoutBranch]
+
+    public init(components: [PaneLayoutBranch] = []) {
+        self.components = components
+    }
+
+    public init(parsing rawValue: String) throws {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            self = .root
+            return
+        }
+
+        let parts = trimmed.split(separator: ".").map(String.init)
+        guard parts.first == "root" else {
+            throw WorkspaceError.invalidSplitPath(rawValue)
+        }
+
+        self.components = try parts.dropFirst().map { part in
+            guard let branch = PaneLayoutBranch(rawValue: part) else {
+                throw WorkspaceError.invalidSplitPath(rawValue)
+            }
+
+            return branch
+        }
+    }
+
+    public var description: String {
+        guard !components.isEmpty else {
+            return "root"
+        }
+
+        return "root." + components.map(\.rawValue).joined(separator: ".")
+    }
+
+    public func appending(_ branch: PaneLayoutBranch) -> PaneLayoutPath {
+        PaneLayoutPath(components: components + [branch])
+    }
+}
+
+public struct PaneSplitDescriptor: Codable, Sendable, Equatable {
+    public var path: String
+    public var axis: PaneSplitAxis
+    public var ratio: Double
+
+    public init(path: String, axis: PaneSplitAxis, ratio: Double) {
+        self.path = path
+        self.axis = axis
+        self.ratio = ratio
+    }
+}
+
 public indirect enum PaneLayoutNode: Codable, Sendable, Equatable {
     case leaf(String)
     case split(axis: PaneSplitAxis, ratio: Double, primary: PaneLayoutNode, secondary: PaneLayoutNode)
@@ -82,6 +142,71 @@ public indirect enum PaneLayoutNode: Codable, Sendable, Equatable {
             try container.encode(secondary, forKey: .secondary)
         }
     }
+
+    public func splitDescriptors(path: PaneLayoutPath = .root) -> [PaneSplitDescriptor] {
+        switch self {
+        case .leaf:
+            return []
+        case .split(let axis, let ratio, let primary, let secondary):
+            return [
+                PaneSplitDescriptor(
+                    path: path.description,
+                    axis: axis,
+                    ratio: PaneSplitLayoutMetrics.clampedRatio(ratio)
+                )
+            ]
+            + primary.splitDescriptors(path: path.appending(.primary))
+            + secondary.splitDescriptors(path: path.appending(.secondary))
+        }
+    }
+
+    public func splitDescriptor(at path: PaneLayoutPath) throws -> PaneSplitDescriptor {
+        guard let descriptor = splitDescriptors().first(where: { $0.path == path.description }) else {
+            throw WorkspaceError.splitNotFound(path.description)
+        }
+
+        return descriptor
+    }
+
+    public func updatingSplitRatio(at path: PaneLayoutPath, ratio: Double) throws -> PaneLayoutNode {
+        try updatingSplitRatio(
+            at: ArraySlice(path.components),
+            fullPath: path,
+            ratio: PaneSplitLayoutMetrics.clampedRatio(ratio)
+        )
+    }
+
+    private func updatingSplitRatio(
+        at path: ArraySlice<PaneLayoutBranch>,
+        fullPath: PaneLayoutPath,
+        ratio: Double
+    ) throws -> PaneLayoutNode {
+        switch self {
+        case .leaf:
+            throw WorkspaceError.splitNotFound(fullPath.description)
+        case .split(let axis, let currentRatio, let primary, let secondary):
+            guard let branch = path.first else {
+                return .split(axis: axis, ratio: ratio, primary: primary, secondary: secondary)
+            }
+
+            switch branch {
+            case .primary:
+                let updatedPrimary = try primary.updatingSplitRatio(
+                    at: path.dropFirst(),
+                    fullPath: fullPath,
+                    ratio: ratio
+                )
+                return .split(axis: axis, ratio: currentRatio, primary: updatedPrimary, secondary: secondary)
+            case .secondary:
+                let updatedSecondary = try secondary.updatingSplitRatio(
+                    at: path.dropFirst(),
+                    fullPath: fullPath,
+                    ratio: ratio
+                )
+                return .split(axis: axis, ratio: currentRatio, primary: primary, secondary: updatedSecondary)
+            }
+        }
+    }
 }
 
 public struct PaneChromeConfiguration: Codable, Sendable {
@@ -109,6 +234,8 @@ public enum WorkspaceError: Error, LocalizedError {
     case sessionNotFound(String)
     case windowNotFound(String)
     case paneNotFound(String)
+    case invalidSplitPath(String)
+    case splitNotFound(String)
     case invalidPane(String)
 
     public var errorDescription: String? {
@@ -119,6 +246,10 @@ public enum WorkspaceError: Error, LocalizedError {
             return "Window not found: \(id)"
         case .paneNotFound(let id):
             return "Pane not found: \(id)"
+        case .invalidSplitPath(let path):
+            return "Invalid split path: \(path)"
+        case .splitNotFound(let path):
+            return "Split not found: \(path)"
         case .invalidPane(let message):
             return message
         }
@@ -169,6 +300,26 @@ public struct Workspace: Codable {
             throw WorkspaceError.paneNotFound(paneID)
         }
         return pane
+    }
+
+    public func splitDescriptors(sessionID: String, windowID: String) throws -> [PaneSplitDescriptor] {
+        guard let layout = try resolvedLayout(sessionID: sessionID, windowID: windowID) else {
+            return []
+        }
+
+        return layout.splitDescriptors()
+    }
+
+    public func splitDescriptor(
+        sessionID: String,
+        windowID: String,
+        splitPath: PaneLayoutPath
+    ) throws -> PaneSplitDescriptor {
+        guard let layout = try resolvedLayout(sessionID: sessionID, windowID: windowID) else {
+            throw WorkspaceError.splitNotFound(splitPath.description)
+        }
+
+        return try layout.splitDescriptor(at: splitPath)
     }
 
     public func windowTitles(sessionID: String) throws -> [String] {
@@ -253,6 +404,24 @@ public struct Workspace: Codable {
     }
 
     @discardableResult
+    public mutating func updateSplitRatio(
+        sessionID: String,
+        windowID: String,
+        splitPath: PaneLayoutPath,
+        ratio: Double
+    ) throws -> PaneSplitDescriptor {
+        let sessionIndex = try requireSessionIndex(sessionID: sessionID)
+        let windowIndex = try requireWindowIndex(sessionIndex: sessionIndex, windowID: windowID)
+        guard let currentLayout = resolvedLayout(for: sessions[sessionIndex].windows[windowIndex]) else {
+            throw WorkspaceError.splitNotFound(splitPath.description)
+        }
+
+        let updatedLayout = try currentLayout.updatingSplitRatio(at: splitPath, ratio: ratio)
+        sessions[sessionIndex].windows[windowIndex].layout = updatedLayout
+        return try updatedLayout.splitDescriptor(at: splitPath)
+    }
+
+    @discardableResult
     public mutating func splitPane(
         sessionID: String,
         windowID: String,
@@ -311,6 +480,15 @@ public struct Workspace: Codable {
         }
 
         return paneIndex
+    }
+
+    private func resolvedLayout(sessionID: String, windowID: String) throws -> PaneLayoutNode? {
+        let window = try window(sessionID: sessionID, windowID: windowID)
+        return resolvedLayout(for: window)
+    }
+
+    private func resolvedLayout(for window: WorkspaceWindow) -> PaneLayoutNode? {
+        window.layout ?? legacyLayout(for: window.panes)
     }
 
     private func legacyLayout(for panes: [WorkspacePane]) -> PaneLayoutNode? {

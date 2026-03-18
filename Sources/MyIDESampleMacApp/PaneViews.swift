@@ -1,65 +1,6 @@
-import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 import MyIDECore
-
-struct ProportionalSplitView<Primary: View, Secondary: View>: View {
-    let axis: PaneSplitAxis
-    let ratio: Double
-    @ViewBuilder let primary: Primary
-    @ViewBuilder let secondary: Secondary
-
-    var body: some View {
-        GeometryReader { geometry in
-            let metrics = PaneSplitLayoutMetrics(
-                totalExtent: axis == .vertical ? geometry.size.width : geometry.size.height,
-                ratio: ratio
-            )
-            let primaryExtent = CGFloat(metrics.primaryExtent)
-            let secondaryExtent = CGFloat(metrics.secondaryExtent)
-            let dividerThickness = CGFloat(PaneSplitLayoutMetrics.dividerThickness)
-            let dividerOffset = CGFloat(metrics.dividerOffset)
-
-            if axis == .vertical {
-                ZStack(alignment: .topLeading) {
-                    HStack(spacing: 0) {
-                        primary
-                            .frame(width: primaryExtent)
-                            .frame(maxHeight: .infinity)
-                        secondary
-                            .frame(width: secondaryExtent)
-                            .frame(maxHeight: .infinity)
-                    }
-
-                    Rectangle()
-                        .fill(Color(nsColor: .separatorColor))
-                        .frame(width: dividerThickness)
-                        .frame(maxHeight: .infinity)
-                        .offset(x: dividerOffset)
-                }
-                .clipped()
-            } else {
-                ZStack(alignment: .topLeading) {
-                    VStack(spacing: 0) {
-                        primary
-                            .frame(height: primaryExtent)
-                            .frame(maxWidth: .infinity)
-                        secondary
-                            .frame(height: secondaryExtent)
-                            .frame(maxWidth: .infinity)
-                    }
-
-                    Rectangle()
-                        .fill(Color(nsColor: .separatorColor))
-                        .frame(height: dividerThickness)
-                        .frame(maxWidth: .infinity)
-                        .offset(y: dividerOffset)
-                }
-                .clipped()
-            }
-        }
-    }
-}
 
 struct PaneWorkspaceView: View {
     let layout: PaneLayoutNode?
@@ -72,6 +13,7 @@ struct PaneWorkspaceView: View {
     let onUpdateDiffPaths: (String, String, String) -> Void
     let onUpdatePreviewPath: (String, String) -> Void
     let onConfigurePane: (String, PaneKind) -> Void
+    let onUpdateSplitRatio: (PaneLayoutPath, Double) -> Void
 
     var body: some View {
         Group {
@@ -100,6 +42,10 @@ struct PaneWorkspaceView: View {
     }
 
     private func layoutView(for node: PaneLayoutNode) -> AnyView {
+        layoutView(for: node, path: .root)
+    }
+
+    private func layoutView(for node: PaneLayoutNode, path: PaneLayoutPath) -> AnyView {
         switch node {
         case .leaf(let paneID):
             if let pane = panes.first(where: { $0.id == paneID }) {
@@ -108,10 +54,15 @@ struct PaneWorkspaceView: View {
             return AnyView(EmptyView())
         case .split(let axis, let ratio, let primary, let secondary):
             return AnyView(
-                ProportionalSplitView(axis: axis, ratio: ratio) {
-                    layoutView(for: primary)
+                ProportionalSplitView(
+                    axis: axis,
+                    splitPath: path,
+                    ratio: ratio,
+                    onUpdateRatio: onUpdateSplitRatio
+                ) {
+                    layoutView(for: primary, path: path.appending(.primary))
                 } secondary: {
-                    layoutView(for: secondary)
+                    layoutView(for: secondary, path: path.appending(.secondary))
                 }
             )
         }

@@ -50,6 +50,30 @@ Feature: Regression prevention
     And the compact picker should collapse to 1 column
     And the compact picker should require scrolling instead of overflowing
 
+  Scenario: Divider drag resizing updates width and height ratios persistently
+    When I headless-check pane divider resizing
+    Then dragging a 400-point vertical divider to 260 should store ratio 0.65
+    And the resized vertical split should produce pane extents of 260 and 140
+    And dragging a 300-point horizontal divider to 225 should store ratio 0.75
+    And the resized horizontal split should produce pane extents of 225 and 75
+    And reloading the workspace should keep a "vertical" split at "root" with ratio 0.65
+    And reloading the workspace should keep a "horizontal" split at "root.secondary" with ratio 0.75
+
+  Scenario: Nested split resizing only affects the targeted branch
+    When I headless-check nested split resize isolation
+    Then dragging the horizontal divider up should make the top and bottom heights 100 and 300
+    And before resizing the top vertical divider both top and bottom rows should keep widths 100 and 100
+    And dragging only the top vertical divider left should make the top row widths 50 and 150
+    And dragging only the top vertical divider left should keep the bottom row widths 100 and 100
+    And dragging only the top vertical divider should keep the bottom split ratio 0.5
+
+  Scenario: Divider hit testing only activates on the actual split boundary
+    When I headless-check split divider hit testing
+    Then a point near the top edge of a horizontal split should not hit the divider
+    And a point on the horizontal divider should hit the divider
+    And a point near the left edge of a vertical split should not hit the divider
+    And a point on the vertical divider should hit the divider
+
   Scenario: Nested pane splits preserve layout tree structure
     When I headless-check nested pane split
     Then the nested split should produce 3 panes

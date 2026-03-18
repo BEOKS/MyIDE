@@ -115,6 +115,23 @@ private struct CLI {
             try workspace.addPane(pane, toSessionID: sessionID, windowID: windowID)
             try WorkspaceStore.saveAndNotify(workspace, to: workspaceURL)
             try printJSON(pane)
+        case "split-pane":
+            let workspaceURL = try workspaceURL(from: options)
+            var workspace = try WorkspaceStore.load(from: workspaceURL)
+            let sessionID = try requiredOption("session-id", in: options)
+            let windowID = try requiredOption("window-id", in: options)
+            let paneID = try requiredOption("pane-id", in: options)
+            let axis = try paneSplitAxis(from: options)
+            let pane = try makePane(from: options)
+            let newPane = try workspace.splitPane(
+                sessionID: sessionID,
+                windowID: windowID,
+                paneID: paneID,
+                axis: axis,
+                newPane: pane
+            )
+            try WorkspaceStore.saveAndNotify(workspace, to: workspaceURL)
+            try printJSON(newPane)
         case "show-pane":
             let workspaceURL = try workspaceURL(from: options)
             let workspace = try WorkspaceStore.load(from: workspaceURL)
@@ -122,6 +139,12 @@ private struct CLI {
             let windowID = try requiredOption("window-id", in: options)
             let paneID = try requiredOption("pane-id", in: options)
             try printJSON(try workspace.pane(sessionID: sessionID, windowID: windowID, paneID: paneID))
+        case "list-splits":
+            let workspaceURL = try workspaceURL(from: options)
+            let workspace = try WorkspaceStore.load(from: workspaceURL)
+            let sessionID = try requiredOption("session-id", in: options)
+            let windowID = try requiredOption("window-id", in: options)
+            try printJSON(try workspace.splitDescriptors(sessionID: sessionID, windowID: windowID))
         case "update-pane":
             let workspaceURL = try workspaceURL(from: options)
             var workspace = try WorkspaceStore.load(from: workspaceURL)
@@ -133,6 +156,21 @@ private struct CLI {
             }
             try WorkspaceStore.saveAndNotify(workspace, to: workspaceURL)
             try printJSON(try workspace.pane(sessionID: sessionID, windowID: windowID, paneID: paneID))
+        case "update-split":
+            let workspaceURL = try workspaceURL(from: options)
+            var workspace = try WorkspaceStore.load(from: workspaceURL)
+            let sessionID = try requiredOption("session-id", in: options)
+            let windowID = try requiredOption("window-id", in: options)
+            let splitPath = try PaneLayoutPath(parsing: requiredOption("split-path", in: options))
+            let ratio = try requiredDoubleOption("ratio", in: options)
+            let descriptor = try workspace.updateSplitRatio(
+                sessionID: sessionID,
+                windowID: windowID,
+                splitPath: splitPath,
+                ratio: ratio
+            )
+            try WorkspaceStore.saveAndNotify(workspace, to: workspaceURL)
+            try printJSON(descriptor)
         case "delete-pane":
             let workspaceURL = try workspaceURL(from: options)
             var workspace = try WorkspaceStore.load(from: workspaceURL)
@@ -206,6 +244,12 @@ private struct CLI {
         case "headless-send-terminal-eot", "ui-send-terminal-eot":
             let result = TerminalHeadlessHarness.checkEndOfTransmissionClosesPane()
             try printJSON(result)
+        case "ui-check-pane-divider-drag":
+            let appURL = URL(fileURLWithPath: CommandLine.arguments[0])
+                .deletingLastPathComponent()
+                .appendingPathComponent("MyIDESampleMacApp")
+            let result = try TerminalUIAutomation.runPaneDividerDragTest(appExecutableURL: appURL)
+            try printJSON(result)
         case "headless-select-preview-file", "ui-select-preview-file":
             let selectedFile = try requiredOption("selected-file", in: options)
             let result = TerminalHeadlessHarness.selectPreviewFile(selectedFile)
@@ -249,6 +293,15 @@ private struct CLI {
             try printJSON(result)
         case "headless-check-split-presentation-sizing":
             let result = TerminalHeadlessHarness.checkSplitPresentationSizing()
+            try printJSON(result)
+        case "headless-check-pane-divider-resizing":
+            let result = try TerminalHeadlessHarness.checkPaneDividerResizing()
+            try printJSON(result)
+        case "headless-check-split-divider-hit-testing":
+            let result = TerminalHeadlessHarness.checkSplitDividerHitTesting()
+            try printJSON(result)
+        case "headless-check-nested-split-resize-isolation":
+            let result = try TerminalHeadlessHarness.checkNestedSplitResizeIsolation()
             try printJSON(result)
         case "headless-check-nested-pane-split":
             let result = try TerminalHeadlessHarness.checkNestedPaneSplit()
@@ -387,6 +440,15 @@ private struct CLI {
         URL(fileURLWithPath: try requiredOption("workspace", in: options))
     }
 
+    private func paneSplitAxis(from options: [String: String]) throws -> PaneSplitAxis {
+        let axisValue = try requiredOption("axis", in: options)
+        guard let axis = PaneSplitAxis(rawValue: axisValue) else {
+            throw WorkspaceError.invalidPane("Unsupported split axis: \(axisValue)")
+        }
+
+        return axis
+    }
+
     private func parseOptions(_ args: [String]) -> [String: String] {
         var options: [String: String] = [:]
         var index = 0
@@ -419,6 +481,15 @@ private struct CLI {
         return value
     }
 
+    private func requiredDoubleOption(_ key: String, in options: [String: String]) throws -> Double {
+        let rawValue = try requiredOption(key, in: options)
+        guard let value = Double(rawValue) else {
+            throw WorkspaceError.invalidPane("Invalid numeric value for --\(key): \(rawValue)")
+        }
+
+        return value
+    }
+
     private func printJSON<T: Encodable>(_ value: T) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -443,7 +514,10 @@ private struct CLI {
       delete-window --workspace PATH --session-id ID --window-id ID
       show-pane --workspace PATH --session-id ID --window-id ID --pane-id ID
       add-pane --workspace PATH --session-id ID --window-id ID --kind terminal|browser|diff|markdown|image [options]
+      split-pane --workspace PATH --session-id ID --window-id ID --pane-id ID --axis vertical|horizontal --kind terminal|browser|diff|markdown|image [options]
+      list-splits --workspace PATH --session-id ID --window-id ID
       update-pane --workspace PATH --session-id ID --window-id ID --pane-id ID [--title TITLE] [--provider PROVIDER] [--working-directory PATH] [--url URL] [--left PATH] [--right PATH] [--file PATH]
+      update-split --workspace PATH --session-id ID --window-id ID --split-path root[.primary|.secondary...] --ratio VALUE
       delete-pane --workspace PATH --session-id ID --window-id ID --pane-id ID
       run-terminal --workspace PATH --session-id ID --window-id ID --pane-id ID --command COMMAND
       refresh-diff --workspace PATH --session-id ID --window-id ID --pane-id ID
@@ -454,6 +528,7 @@ private struct CLI {
       headless-check-terminal-layout
       headless-check-pane-chrome
       headless-send-terminal-eot
+      ui-check-pane-divider-drag
       headless-select-preview-file --selected-file PATH
       headless-select-diff-file --selected-file PATH
       headless-check-session-window-semantics
@@ -467,6 +542,9 @@ private struct CLI {
       headless-check-pane-split-and-remove
       headless-check-pane-layout-stability
       headless-check-split-presentation-sizing
+      headless-check-pane-divider-resizing
+      headless-check-split-divider-hit-testing
+      headless-check-nested-split-resize-isolation
       headless-check-nested-pane-split
       headless-check-tmux-split-key-matching
       headless-check-pane-close-shortcuts

@@ -22,9 +22,13 @@ function runCommand(command, args, options = {}) {
 }
 
 BeforeAll(function () {
-  const result = runCommand('swift', ['build'])
-  if (result.status !== 0) {
-    throw new Error(`swift build failed:\n${result.stderr}`)
+  const products = ['MyIDECLI', 'MyIDESampleMacApp']
+
+  for (const product of products) {
+    const result = runCommand('swift', ['build', '--product', product])
+    if (result.status !== 0) {
+      throw new Error(`swift build --product ${product} failed:\n${result.stderr}`)
+    }
   }
 })
 
@@ -55,8 +59,11 @@ Before(function () {
   this.currentSession = null
   this.currentWindow = null
   this.currentPane = null
+  this.currentSplit = null
+  this.currentSplits = null
   this.renderedHtml = null
   this.terminalInteraction = null
+  this.dividerResizeResult = null
 })
 
 After(function () {

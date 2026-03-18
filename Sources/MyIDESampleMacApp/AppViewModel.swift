@@ -176,6 +176,20 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func updateSplitRatio(sessionID: String, windowID: String, splitPath: PaneLayoutPath, ratio: Double) {
+        do {
+            _ = try workspace.updateSplitRatio(
+                sessionID: sessionID,
+                windowID: windowID,
+                splitPath: splitPath,
+                ratio: ratio
+            )
+            persist()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func runTerminalCommand(paneID: String, command: String) {
         _ = paneID
         _ = command
@@ -218,7 +232,9 @@ final class AppViewModel: ObservableObject {
 
     private func persist() {
         do {
-            try WorkspaceStore.save(workspace, to: persistenceURL)
+            let currentWorkspace = workspace
+            workspace = currentWorkspace
+            try WorkspaceStore.save(currentWorkspace, to: persistenceURL)
         } catch {
             errorMessage = error.localizedDescription
         }

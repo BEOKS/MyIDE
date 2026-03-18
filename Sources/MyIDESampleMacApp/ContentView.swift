@@ -127,6 +127,14 @@ struct ContentView: View {
                 },
                 onConfigurePane: { paneID, kind in
                     viewModel.configurePane(sessionID: sessionID, windowID: window.id, paneID: paneID, kind: kind)
+                },
+                onUpdateSplitRatio: { splitPath, ratio in
+                    viewModel.updateSplitRatio(
+                        sessionID: sessionID,
+                        windowID: window.id,
+                        splitPath: splitPath,
+                        ratio: ratio
+                    )
                 }
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
